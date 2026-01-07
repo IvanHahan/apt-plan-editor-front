@@ -1,0 +1,25 @@
+{
+  "name": "apt-plan-editor-front",
+  "version": "1.0.0",
+  "description": "Floor plan editor web app with TypeScript and D3",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "serve": "python3 -m http.server 8000",
+    "dev": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["floor-plan", "d3", "typescript", "editor"],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.27.0",
+  "devDependencies": {
+    "@types/d3": "^7.4.3",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "d3": "^7.9.0"
+  }
+}

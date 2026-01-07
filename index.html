@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apartment Floor Plan Editor</title>
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- Import map for D3 -->
+    <script type="importmap">
+    {
+        "imports": {
+            "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Left Panel: Project Selector -->
+        <div class="panel panel-left">
+            <h2>Projects</h2>
+            <div class="project-list">
+                <div class="project-item active">Sample Apartment</div>
+                <div class="project-item">New Project</div>
+            </div>
+        </div>
+
+        <!-- Middle Panel: Canvas -->
+        <div class="panel panel-middle">
+            <div class="canvas-header">
+                <h2>Floor Plan Editor</h2>
+                <div class="canvas-controls">
+                    <button id="resetZoom">Reset Zoom</button>
+                </div>
+            </div>
+            <div id="canvas-container">
+                <svg id="floor-plan-canvas"></svg>
+            </div>
+        </div>
+
+        <!-- Right Panel: Chat -->
+        <div class="panel panel-right">
+            <h2>Assistant</h2>
+            <div class="chat-container">
+                <div class="chat-messages">
+                    <div class="chat-message">Welcome! Click on edges to see details.</div>
+                </div>
+                <div class="chat-input">
+                    <input type="text" placeholder="Type a message...">
+                    <button>Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./dist/index.js"></script>
+</body>
+</html>
