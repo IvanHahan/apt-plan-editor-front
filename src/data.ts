@@ -1,4 +1,4 @@
-import type { FloorPlan } from "./types.js";
+import type { FloorPlan } from "./types";
 
 /**
  * Sample apartment floor plan with 4 rooms:

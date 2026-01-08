@@ -1,25 +1,34 @@
 {
   "name": "apt-plan-editor-front",
   "version": "1.0.0",
-  "description": "Floor plan editor web app with TypeScript and D3",
+  "description": "Floor plan editor web app with React, Vite, and D3",
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
-    "watch": "tsc --watch",
-    "serve": "python3 -m http.server 8000",
-    "dev": "tsc --watch",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
-  "keywords": ["floor-plan", "d3", "typescript", "editor"],
+  "keywords": ["floor-plan", "d3", "typescript", "react", "vite", "editor"],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.27.0",
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "d3": "^7.9.0"
+  },
   "devDependencies": {
     "@types/d3": "^7.4.3",
-    "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "d3": "^7.9.0"
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^8.56.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.1.0"
   }
 }
