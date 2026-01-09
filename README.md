@@ -54,7 +54,7 @@ src/
 │   └── EditorLayout.css
 ├── App.tsx                     # Root component
 ├── App.css
-├── main.tsx                    # Entry point
+├── index.tsx                    # Entry point
 ├── index.css
 ├── types.ts                    # TypeScript interfaces
 ├── data.ts                     # Sample floor plan data
