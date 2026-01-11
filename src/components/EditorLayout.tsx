@@ -1,18 +1,42 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { sampleFloorPlan } from '../data';
 import './EditorLayout.css';
 
 export const EditorLayout: React.FC = () => {
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(200);
+  const [rightPanelWidth, setRightPanelWidth] = useState(280);
+  const contentAreaRef = useRef<HTMLDivElement>(null);
 
-  const selectedEdge = sampleFloorPlan.edges.find((e) => e.id === selectedEdgeId);
-  const sourceNode = selectedEdge
-    ? sampleFloorPlan.nodes.find((n) => n.id === selectedEdge.source)
-    : null;
-  const targetNode = selectedEdge
-    ? sampleFloorPlan.nodes.find((n) => n.id === selectedEdge.target)
-    : null;
+  const handleMouseDown = (
+    e: React.MouseEvent,
+    side: 'left' | 'right'
+  ) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startLeftWidth = leftPanelWidth;
+    const startRightWidth = rightPanelWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+
+      if (side === 'left') {
+        const newWidth = Math.max(150, Math.min(400, startLeftWidth + deltaX));
+        setLeftPanelWidth(newWidth);
+      } else {
+        const newWidth = Math.max(150, Math.min(400, startRightWidth - deltaX));
+        setRightPanelWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
 
   const handleResetZoom = () => {
     // Reset zoom functionality
@@ -24,68 +48,66 @@ export const EditorLayout: React.FC = () => {
 
   return (
     <div className="app-container">
-      {/* Left Panel: Project Selector */}
-      <div className="panel panel-left">
-        <h2>Projects</h2>
-        <div className="project-list">
-          <div className="project-item active">Sample Apartment</div>
-          <div className="project-item">New Project</div>
+      {/* Top Header Bar */}
+      <div className="canvas-header">
+        <h2>Floor Plan Editor</h2>
+        <div className="canvas-controls">
+          <button onClick={handleResetZoom}>Reset Zoom</button>
         </div>
       </div>
 
-      {/* Middle Panel: Canvas */}
-      <div className="panel panel-middle">
-        <div className="canvas-header">
-          <h2>Floor Plan Editor</h2>
-          <div className="canvas-controls">
-            <button onClick={handleResetZoom}>Reset Zoom</button>
+      {/* Content Area */}
+      <div className="content-area" ref={contentAreaRef}>
+        {/* Left Panel: Project Selector */}
+        <div className="panel panel-left" style={{ width: `${leftPanelWidth}px` }}>
+          <h2>Projects</h2>
+          <div className="project-list">
+            <div className="project-item">New project</div>
+            <div className="project-item">Your projects</div>
+            <div className="project-item">Search</div>
           </div>
         </div>
-        <div id="canvas-container">
-          <FloorPlanCanvas
-            floorPlan={sampleFloorPlan}
-            onEdgeClick={setSelectedEdgeId}
-          />
-        </div>
-      </div>
 
-      {/* Right Panel: Properties */}
-      <div className="panel panel-right">
-        <h2>Properties</h2>
-        <div className="properties-container">
-          {selectedEdge ? (
-            <>
-              <div className="property-section">
-                <h3>Selected Element</h3>
-                <div className="property-item">
-                  <label>Type:</label>
-                  <span className="property-value">{selectedEdge.type}</span>
-                </div>
-                <div className="property-item">
-                  <label>ID:</label>
-                  <span className="property-value">{selectedEdge.id}</span>
-                </div>
-                <div className="property-item">
-                  <label>Source:</label>
-                  <span className="property-value">{sourceNode?.id}</span>
-                </div>
-                <div className="property-item">
-                  <label>Target:</label>
-                  <span className="property-value">{targetNode?.id}</span>
-                </div>
-              </div>
-              <button
-                className="clear-selection-btn"
-                onClick={() => setSelectedEdgeId(null)}
-              >
-                Clear Selection
-              </button>
-            </>
-          ) : (
-            <div className="properties-placeholder">
-              Click on an element to view its properties
+        {/* Left Divider */}
+        <div
+          className="panel-divider"
+          onMouseDown={(e) => handleMouseDown(e, 'left')}
+        />
+
+        {/* Middle Panel: Canvas */}
+        <div className="panel panel-middle">
+          <div id="canvas-container">
+            <FloorPlanCanvas
+              floorPlan={sampleFloorPlan}
+              onEdgeClick={() => {}}
+            />
+          </div>
+        </div>
+
+        {/* Right Divider */}
+        <div
+          className="panel-divider"
+          onMouseDown={(e) => handleMouseDown(e, 'right')}
+        />
+
+        {/* Right Panel: Roomly Live Assistant */}
+        <div className="panel panel-right" style={{ width: `${rightPanelWidth}px` }}>
+          <h2>Roomly Live Assistant</h2>
+          <div className="assistant-section">
+            <div className="assistant-card">
+              <h3 className="assistant-title">Roomly.Agent</h3>
+              <p className="assistant-message">How many rooms does your apartment have?</p>
             </div>
-          )}
+            <div className="assistant-card">
+              <p className="assistant-response">
+                <strong>Ronald</strong><br />
+                5
+              </p>
+            </div>
+            <div className="assistant-footer">
+              <button className="assistant-button">let us know more</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
