@@ -6,6 +6,12 @@ A modern floor plan editor web application built with React, Vite, and D3.js.
 
 - **Interactive Floor Plan Editor**: Visual editing of apartment layouts
 - **D3.js Visualization**: Professional rendering with zoom and pan support
+- **Adaptive Rendering**: 
+  - Walls rendered as polygons with thickness (from backend API)
+  - Rooms with color-coded classification (bedroom, kitchen, bathroom, etc.)
+  - Fixtures as polygons (doors, windows, furniture)
+  - Fallback to simple line rendering for basic data
+- **Backend Integration**: Upload images for automatic floor plan digitalization
 - **React Components**: Modern component-based architecture
 - **TypeScript**: Full type safety and developer experience
 - **Vite**: Fast development and optimized production builds
@@ -16,11 +22,25 @@ A modern floor plan editor web application built with React, Vite, and D3.js.
 
 - Node.js 16+
 - pnpm (or npm/yarn)
+- Backend API running on port 8000 (see `docs/REST_API.md`)
 
 ### Installation
 
 ```bash
 pnpm install
+```
+
+### Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` to set the backend API URL:
+```
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ### Development
@@ -81,6 +101,30 @@ interface Edge {
   source: string;  // Node ID
   target: string;  // Node ID
   type: "wall" | "door" | "window";
+  thickness?: number;       // Wall thickness for polygon rendering
+  is_inner?: boolean;       // Inner vs outer wall
+  properties?: object;      // Additional metadata
+}
+```
+
+### Room
+Represents a classified room polygon:
+```typescript
+interface Room {
+  id: string;
+  polygon_coords: [number, number][];
+  tags: string[];  // e.g., ["bedroom"], ["kitchen"]
+}
+```
+
+### Fixture
+Represents doors, windows, furniture:
+```typescript
+interface Fixture {
+  id: string;
+  polygon_coords: [number, number][];
+  fixture_type: string;     // "door", "window", etc.
+  properties?: object;
 }
 ```
 
@@ -90,6 +134,8 @@ Complete floor plan data:
 interface FloorPlan {
   nodes: Node[];
   edges: Edge[];
+  rooms?: Room[];
+  fixtures?: Fixture[];
 }
 ```
 

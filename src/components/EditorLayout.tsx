@@ -1,12 +1,97 @@
 import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { sampleFloorPlan } from '../data';
+import { processFloorPlanImage, listUserFloorPlans, type FloorPlanSummary } from '../api/client';
+import { convertApiToFloorPlan } from '../utils/converter';
+import type { FloorPlan } from '../types';
 import './EditorLayout.css';
+
+// Get user ID from env (in production, get from auth)
+const USER_ID = import.meta.env.VITE_USER_ID || '550e8400-e29b-41d4-a716-446655440000';
 
 export const EditorLayout: React.FC = () => {
   const [leftPanelWidth, setLeftPanelWidth] = useState(200);
   const [rightPanelWidth, setRightPanelWidth] = useState(280);
   const contentAreaRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [floorPlan, setFloorPlan] = useState<FloorPlan>(sampleFloorPlan);
+  const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
+  const [userPlans, setUserPlans] = useState<FloorPlanSummary[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load user's plans on mount
+  React.useEffect(() => {
+    loadUserPlans();
+  }, []);
+
+  const loadUserPlans = async () => {
+    setIsLoadingPlans(true);
+    setError(null);
+    try {
+      const plans = await listUserFloorPlans(USER_ID);
+      setUserPlans(plans);
+    } catch (err) {
+      console.error('Failed to load plans:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load plans');
+    } finally {
+      setIsLoadingPlans(false);
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const planName = file.name.replace(/\.[^/.]+$/, ''); // Remove extension
+      const result = await processFloorPlanImage(file, USER_ID, planName);
+      
+      const convertedPlan = convertApiToFloorPlan(result);
+      setFloorPlan(convertedPlan);
+      setCurrentPlanId(result.id);
+      
+      // Reload plans list
+      await loadUserPlans();
+    } catch (err) {
+      console.error('Upload failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process image');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleLoadPlan = async (planId: string) => {
+    setError(null);
+    try {
+      const { getFloorPlan } = await import('../api/client');
+      const apiPlan = await getFloorPlan(planId);
+      const convertedPlan = convertApiToFloorPlan(apiPlan);
+      setFloorPlan(convertedPlan);
+      setCurrentPlanId(planId);
+    } catch (err) {
+      console.error('Failed to load plan:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load plan');
+    }
+  };
+
+  const handleNewPlan = () => {
+    setFloorPlan(sampleFloorPlan);
+    setCurrentPlanId(null);
+    setError(null);
+  };
 
   const handleMouseDown = (
     e: React.MouseEvent,
@@ -48,11 +133,24 @@ export const EditorLayout: React.FC = () => {
 
   return (
     <div className="app-container">
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+      />
+
       {/* Top Header Bar */}
       <div className="canvas-header">
         <h2>Floor Plan Editor</h2>
         <div className="canvas-controls">
+          <button onClick={handleUploadClick} disabled={isUploading}>
+            {isUploading ? 'Uploading...' : 'Upload Image'}
+          </button>
           <button onClick={handleResetZoom}>Reset Zoom</button>
+          {error && <span style={{ color: '#ff4444', marginLeft: '10px' }}>{error}</span>}
         </div>
       </div>
 
@@ -62,9 +160,46 @@ export const EditorLayout: React.FC = () => {
         <div className="panel panel-left" style={{ width: `${leftPanelWidth}px` }}>
           <h2>Projects</h2>
           <div className="project-list">
-            <div className="project-item">New project</div>
-            <div className="project-item">Your projects</div>
-            <div className="project-item">Search</div>
+            <div 
+              className="project-item" 
+              onClick={handleNewPlan}
+              style={{ cursor: 'pointer', fontWeight: currentPlanId === null ? 'bold' : 'normal' }}
+            >
+              New project
+            </div>
+            <div 
+              className="project-item" 
+              onClick={handleUploadClick}
+              style={{ cursor: 'pointer' }}
+            >
+              {isUploading ? '⏳ Uploading...' : '📁 Upload Image'}
+            </div>
+            <div style={{ marginTop: '10px', padding: '5px', fontSize: '12px', color: '#666' }}>
+              Your projects {isLoadingPlans && '(loading...)'}
+            </div>
+            {userPlans.length === 0 && !isLoadingPlans && (
+              <div style={{ padding: '5px', fontSize: '12px', color: '#999' }}>
+                No plans yet
+              </div>
+            )}
+            {userPlans.map(plan => (
+              <div 
+                key={plan.id}
+                className="project-item"
+                onClick={() => handleLoadPlan(plan.id)}
+                style={{ 
+                  cursor: 'pointer',
+                  fontWeight: currentPlanId === plan.id ? 'bold' : 'normal',
+                  fontSize: '12px'
+                }}
+              >
+                📐 {plan.name || 'Untitled'} 
+                <br />
+                <span style={{ color: '#666' }}>
+                  {plan.rooms_count} rooms
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -78,7 +213,7 @@ export const EditorLayout: React.FC = () => {
         <div className="panel panel-middle">
           <div id="canvas-container">
             <FloorPlanCanvas
-              floorPlan={sampleFloorPlan}
+              floorPlan={floorPlan}
               onEdgeClick={() => {}}
             />
           </div>
