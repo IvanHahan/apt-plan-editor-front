@@ -6,11 +6,13 @@ import './FloorPlanCanvas.css';
 interface FloorPlanCanvasProps {
   floorPlan: FloorPlan;
   onEdgeClick?: (edgeId: string) => void;
+  onRoomClick?: (roomId: string) => void;
 }
 
 export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   floorPlan,
   onEdgeClick,
+  onRoomClick,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
@@ -57,25 +59,66 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           d.polygon_coords.map(([x, y]) => `${x},${y}`).join(' ')
         )
         .attr('fill', (d: Room) => {
-          // Color rooms based on tags
-          if (d.tags.includes('bedroom')) return 'rgba(173, 216, 230, 0.3)';
-          if (d.tags.includes('bathroom')) return 'rgba(255, 182, 193, 0.3)';
-          if (d.tags.includes('kitchen')) return 'rgba(255, 228, 196, 0.3)';
-          if (d.tags.includes('living')) return 'rgba(144, 238, 144, 0.3)';
-          return 'rgba(240, 240, 240, 0.3)';
+          // Generate consistent random color based on room ID
+          const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          const hue = (hash % 360);
+          const saturation = 60 + (hash % 30);
+          const lightness = 60 + (hash % 20);
+          return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
         })
         .attr('stroke', '#ccc')
-        .attr('stroke-width', 1);
+        .attr('stroke-width', 1)
+        .attr('cursor', 'pointer')
+        .on('mouseenter', function(_event, d: Room) {
+          const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          const hue = (hash % 360);
+          const saturation = 60 + (hash % 30);
+          d3.select(this)
+            .attr('fill', `hsl(${hue}, ${saturation}%, 85%)`)
+            .attr('stroke', '#000')
+            .attr('stroke-width', 3);
+        })
+        .on('mouseleave', function(_event, d: Room) {
+          const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+          const hue = (hash % 360);
+          const saturation = 60 + (hash % 30);
+          const lightness = 60 + (hash % 20);
+          d3.select(this)
+            .attr('fill', `hsl(${hue}, ${saturation}%, ${lightness}%)`)
+            .attr('stroke', '#ccc')
+            .attr('stroke-width', 1);
+        })
+        .on('click', function(event, d: Room) {
+          event.stopPropagation();
+          onRoomClick?.(d.id);
+        });
     }
 
-    // Render edges based on whether we have thickness data
-    const hasThickness = floorPlan.edges.some(e => e.thickness !== undefined);
+    // Render edges with geometries
+    // Group edges by type
+    const walls = floorPlan.edges.filter((e: Edge) => e.type === 'wall');
+    const doors = floorPlan.edges.filter((e: Edge) => e.type === 'door');
+    const windows = floorPlan.edges.filter((e: Edge) => e.type === 'window');
 
-    if (hasThickness) {
-      // Render walls as thick polygons
-      const walls = floorPlan.edges.filter((e: Edge) => e.type === 'wall');
-      
-      walls.forEach((edge: Edge) => {
+    // Render walls with geometries
+    walls.forEach((edge: Edge) => {
+      if (edge.geometries && edge.geometries.length > 0) {
+        // Render using polygon geometries from backend
+        edge.geometries.forEach((geom) => {
+          g.append('polygon')
+            .attr('class', 'wall')
+            .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
+            .attr('fill', edge.is_inner ? '#666' : '#333')
+            .attr('stroke', '#000')
+            .attr('stroke-width', 0.5)
+            .attr('cursor', 'pointer')
+            .on('click', function(event) {
+              event.stopPropagation();
+              onEdgeClick?.(edge.id);
+            });
+        });
+      } else {
+        // Fallback: derive polygon from nodes if no geometries
         const sourceNode = floorPlan.nodes.find((n: Node) => n.id === edge.source);
         const targetNode = floorPlan.nodes.find((n: Node) => n.id === edge.target);
         
@@ -99,39 +142,89 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             event.stopPropagation();
             onEdgeClick?.(edge.id);
           });
-      });
-    } else {
-      // Fallback: render as lines (for sample data)
-      const walls = floorPlan.edges.filter((e: Edge) => e.type === 'wall');
-      g.selectAll('.wall')
-        .data(walls, (d: any) => d.id)
-        .enter()
-        .append('line')
-        .attr('class', 'wall')
-        .attr('x1', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.source);
-          return node?.x ?? 0;
-        })
-        .attr('y1', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.source);
-          return node?.y ?? 0;
-        })
-        .attr('x2', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.target);
-          return node?.x ?? 0;
-        })
-        .attr('y2', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.target);
-          return node?.y ?? 0;
-        })
-        .attr('stroke', '#333')
-        .attr('stroke-width', 4)
-        .attr('cursor', 'pointer')
-        .on('click', (event, d: Edge) => {
-          event.stopPropagation();
-          onEdgeClick?.(d.id);
+      }
+    });
+
+    // Render doors with geometries
+    doors.forEach((edge: Edge) => {
+      if (edge.geometries && edge.geometries.length > 0) {
+        // Render using polygon geometries from backend
+        edge.geometries.forEach((geom) => {
+          g.append('polygon')
+            .attr('class', 'door')
+            .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
+            .attr('fill', '#8B4513')
+            .attr('stroke', '#000')
+            .attr('stroke-width', 0.5)
+            .attr('cursor', 'pointer')
+            .on('click', function(event) {
+              event.stopPropagation();
+              onEdgeClick?.(edge.id);
+            });
         });
-    }
+      } else {
+        // Fallback: render as dashed lines
+        const sourceNode = floorPlan.nodes.find((n: Node) => n.id === edge.source);
+        const targetNode = floorPlan.nodes.find((n: Node) => n.id === edge.target);
+        
+        if (!sourceNode || !targetNode) return;
+
+        g.append('line')
+          .attr('class', 'door')
+          .attr('x1', sourceNode.x)
+          .attr('y1', sourceNode.y)
+          .attr('x2', targetNode.x)
+          .attr('y2', targetNode.y)
+          .attr('stroke', '#8B4513')
+          .attr('stroke-width', 3)
+          .attr('stroke-dasharray', '5,5')
+          .attr('cursor', 'pointer')
+          .on('click', function(event) {
+            event.stopPropagation();
+            onEdgeClick?.(edge.id);
+          });
+      }
+    });
+
+    // Render windows with geometries
+    windows.forEach((edge: Edge) => {
+      if (edge.geometries && edge.geometries.length > 0) {
+        // Render using polygon geometries from backend
+        edge.geometries.forEach((geom) => {
+          g.append('polygon')
+            .attr('class', 'window')
+            .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
+            .attr('fill', '#87CEEB')
+            .attr('stroke', '#000')
+            .attr('stroke-width', 0.5)
+            .attr('cursor', 'pointer')
+            .on('click', function(event) {
+              event.stopPropagation();
+              onEdgeClick?.(edge.id);
+            });
+        });
+      } else {
+        // Fallback: render as lines
+        const sourceNode = floorPlan.nodes.find((n: Node) => n.id === edge.source);
+        const targetNode = floorPlan.nodes.find((n: Node) => n.id === edge.target);
+        
+        if (!sourceNode || !targetNode) return;
+
+        g.append('line')
+          .attr('class', 'window')
+          .attr('x1', sourceNode.x)
+          .attr('y1', sourceNode.y)
+          .attr('x2', targetNode.x)
+          .attr('y2', targetNode.y)
+          .attr('stroke', '#87CEEB')
+          .attr('stroke-width', 2)
+          .attr('cursor', 'pointer')
+          .on('click', function(event) {
+            event.stopPropagation();
+            onEdgeClick?.(edge.id);
+          });
+      }
+    });
 
     // Draw fixtures (if available)
     if (floorPlan.fixtures && floorPlan.fixtures.length > 0) {
@@ -151,73 +244,10 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         })
         .attr('stroke', '#000')
         .attr('stroke-width', 0.5);
-    } else {
-      // Fallback: render doors as dashed lines
-      const doors = floorPlan.edges.filter((e: Edge) => e.type === 'door');
-      g.selectAll('.door')
-        .data(doors, (d: any) => d.id)
-        .enter()
-        .append('line')
-        .attr('class', 'door')
-        .attr('x1', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.source);
-          return node?.x ?? 0;
-        })
-        .attr('y1', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.source);
-          return node?.y ?? 0;
-        })
-        .attr('x2', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.target);
-          return node?.x ?? 0;
-        })
-        .attr('y2', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.target);
-          return node?.y ?? 0;
-        })
-        .attr('stroke', '#8B4513')
-        .attr('stroke-width', 3)
-        .attr('stroke-dasharray', '5,5')
-        .attr('cursor', 'pointer')
-        .on('click', (event, d: Edge) => {
-          event.stopPropagation();
-          onEdgeClick?.(d.id);
-        });
-
-      // Fallback: render windows as lines
-      const windows = floorPlan.edges.filter((e: Edge) => e.type === 'window');
-      g.selectAll('.window')
-        .data(windows, (d: any) => d.id)
-        .enter()
-        .append('line')
-        .attr('class', 'window')
-        .attr('x1', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.source);
-          return node?.x ?? 0;
-        })
-        .attr('y1', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.source);
-          return node?.y ?? 0;
-        })
-        .attr('x2', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.target);
-          return node?.x ?? 0;
-        })
-        .attr('y2', (d: Edge) => {
-          const node = floorPlan.nodes.find((n: Node) => n.id === d.target);
-          return node?.y ?? 0;
-        })
-        .attr('stroke', '#87CEEB')
-        .attr('stroke-width', 2)
-        .attr('cursor', 'pointer')
-        .on('click', (event, d: Edge) => {
-          event.stopPropagation();
-          onEdgeClick?.(d.id);
-        });
     }
 
     // Draw nodes (optional, useful for debugging)
-    if (!hasThickness || floorPlan.nodes.length < 50) {
+    if (floorPlan.nodes.length < 50) {
       g.selectAll('.node')
         .data(floorPlan.nodes, (d: any) => d.id)
         .enter()
@@ -233,7 +263,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
     // Center and fit the floor plan
     centerFloorPlan(g, floorPlan, width, height);
-  }, [floorPlan, onEdgeClick]);
+  }, [floorPlan, onEdgeClick, onRoomClick]);
 
   return (
     <div className="floor-plan-canvas-container">

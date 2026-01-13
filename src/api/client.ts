@@ -11,6 +11,11 @@ export interface ApiNode {
   plan_id: string;
 }
 
+export interface ApiEdgeGeometry {
+  id: string;
+  polygon_coords: [number, number][];
+}
+
 export interface ApiEdge {
   id: string;
   plan_id: string;
@@ -20,6 +25,7 @@ export interface ApiEdge {
   is_inner: boolean;
   thickness: number;
   properties: Record<string, any>;
+  geometries?: ApiEdgeGeometry[];
 }
 
 export interface ApiRoom {

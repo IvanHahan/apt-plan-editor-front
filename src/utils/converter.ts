@@ -26,7 +26,7 @@ export function convertApiToFloorPlan(apiPlan: FloorPlanDetail): FloorPlan {
     y: node.y,
   }));
 
-  // Convert edges with thickness and properties
+  // Convert edges with thickness, properties, and geometries
   const edges: Edge[] = apiPlan.edges.map(edge => ({
     id: edge.id,
     source: edge.from_node,
@@ -35,6 +35,7 @@ export function convertApiToFloorPlan(apiPlan: FloorPlanDetail): FloorPlan {
     thickness: edge.thickness,
     is_inner: edge.is_inner,
     properties: edge.properties,
+    geometries: edge.geometries,
   }));
 
   // Convert rooms

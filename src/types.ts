@@ -13,6 +13,14 @@ export interface Node {
 export type EdgeType = "wall" | "door" | "window";
 
 /**
+ * Geometry polygon for an edge
+ */
+export interface EdgeGeometry {
+  id: string;
+  polygon_coords: [number, number][];
+}
+
+/**
  * Represents a connection between two nodes (wall, door, or window)
  */
 export interface Edge {
@@ -23,6 +31,7 @@ export interface Edge {
   thickness?: number;
   is_inner?: boolean;
   properties?: Record<string, any>;
+  geometries?: EdgeGeometry[];
 }
 
 /**
