@@ -342,6 +342,21 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         g.append('polygon')
           .attr('class', 'wall')
           .attr('points', pointsStr)
+          .attr('fill', '#333')
+          .on('mouseenter', function() {
+            d3.select(this)
+              .transition()
+              .duration(150)
+              .attr('fill', '#0066cc')
+              .attr('opacity', 0.9);
+          })
+          .on('mouseleave', function() {
+            d3.select(this)
+              .transition()
+              .duration(150)
+              .attr('fill', '#333')
+              .attr('opacity', 1);
+          })
           .on('click', function(event) {
             event.stopPropagation();
             onEdgeClick?.(edge.id);
