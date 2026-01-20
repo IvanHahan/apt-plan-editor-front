@@ -342,6 +342,7 @@ This endpoint:
       "edge_type": "wall",
       "is_inner": false,
       "thickness": 0.2,
+      "shift": 0.1,
       "properties": {}
     }
   ],
@@ -583,6 +584,7 @@ Error responses follow this format:
       "edge_type": "string",
       "is_inner": "boolean",
       "thickness": "float",
+      "shift": "float",
       "properties": "object"
     }
   ],
@@ -621,7 +623,7 @@ A point in the floor plan graph representing intersections or corners.
 
 ### Edge
 
-A connection between two nodes representing walls or corridors.
+Represents walls, doors, windows, or corridors in the floor plan.
 
 ```json
 {
@@ -629,9 +631,10 @@ A connection between two nodes representing walls or corridors.
   "plan_id": "string (UUID)",
   "from_node": "string",
   "to_node": "string",
-  "edge_type": "string (e.g., 'wall', 'corridor')",
+  "edge_type": "string (e.g., 'wall', 'door', 'window', 'corridor')",
   "is_inner": "boolean",
-  "thickness": "float",
+  "thickness": "float (optional)",
+  "shift": "float (optional)",
   "properties": "object"
 }
 ```

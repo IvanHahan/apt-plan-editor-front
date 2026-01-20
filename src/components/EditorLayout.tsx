@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { sampleFloorPlan } from '../data';
-import { processFloorPlanImage, listUserFloorPlans, type FloorPlanSummary } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, type FloorPlanSummary } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
 import type { FloorPlan } from '../types';
 import './EditorLayout.css';
@@ -131,6 +131,31 @@ export const EditorLayout: React.FC = () => {
     }
   };
 
+  const handleDeletePlan = async () => {
+    if (!currentPlanId) return;
+    
+    const confirmDelete = window.confirm(
+      'Are you sure you want to delete this floor plan? This action cannot be undone.'
+    );
+    
+    if (!confirmDelete) return;
+
+    try {
+      setError(null);
+      await deleteFloorPlan(currentPlanId);
+      
+      // Reset to sample plan and clear selection
+      setFloorPlan(sampleFloorPlan);
+      setCurrentPlanId(null);
+      
+      // Reload plans list
+      await loadUserPlans();
+    } catch (err) {
+      console.error('Failed to delete plan:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete plan');
+    }
+  };
+
   return (
     <div className="app-container">
       {/* Hidden file input */}
@@ -150,6 +175,16 @@ export const EditorLayout: React.FC = () => {
             {isUploading ? 'Uploading...' : 'Upload Image'}
           </button>
           <button onClick={handleResetZoom}>Reset Zoom</button>
+          <button 
+            onClick={handleDeletePlan} 
+            disabled={!currentPlanId}
+            style={{ 
+              color: currentPlanId ? '#d32f2f' : '#ccc',
+              borderColor: currentPlanId ? '#d32f2f' : '#ccc'
+            }}
+          >
+            Delete Plan
+          </button>
           {error && <span style={{ color: '#ff4444', marginLeft: '10px' }}>{error}</span>}
         </div>
       </div>
