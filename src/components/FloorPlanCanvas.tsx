@@ -334,23 +334,6 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     // Render walls with computed geometries
     wallPolygons.forEach((wallPoly: WallPolygon) => {
       const edge = wallPoly.edge;
-      
-      if (edge.geometries && edge.geometries.length > 0) {
-        // Render using polygon geometries from backend (if provided)
-        edge.geometries.forEach((geom) => {
-          g.append('polygon')
-            .attr('class', 'wall')
-            .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
-            .attr('fill', edge.is_inner ? '#666' : '#333')
-            .attr('stroke', '#000')
-            .attr('stroke-width', 0.5)
-            .attr('cursor', 'pointer')
-            .on('click', function(event) {
-              event.stopPropagation();
-              onEdgeClick?.(edge.id);
-            });
-        });
-      } else {
         // Use computed polygon with proper corners
         const pointsStr = wallPoly.polygon
           .map(p => `${p.x},${p.y}`)
@@ -359,15 +342,10 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         g.append('polygon')
           .attr('class', 'wall')
           .attr('points', pointsStr)
-          .attr('fill', edge.is_inner ? '#666' : '#333')
-          .attr('stroke', '#000')
-          .attr('stroke-width', 0.5)
-          .attr('cursor', 'pointer')
           .on('click', function(event) {
             event.stopPropagation();
             onEdgeClick?.(edge.id);
           });
-      }
     });
 
     // Render doors with geometries
@@ -505,20 +483,40 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .attr('stroke-width', 0.5);
     }
 
-    // Draw nodes (optional, useful for debugging)
-    if (floorPlan.nodes.length < 50) {
-      g.selectAll('.node')
-        .data(floorPlan.nodes, (d: any) => d.id)
-        .enter()
-        .append('circle')
-        .attr('class', 'node')
-        .attr('cx', (d: Node) => d.x)
-        .attr('cy', (d: Node) => d.y)
-        .attr('r', 2)
-        .attr('fill', '#666')
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 1);
-    }
+    // Draw node points visualization
+    g.selectAll('.node-group')
+      .data(floorPlan.nodes, (d: any) => d.id)
+      .enter()
+      .append('g')
+      .attr('class', 'node-group')
+      .attr('transform', (d: Node) => `translate(${d.x},${d.y})`)
+      .each(function(d: Node) {
+        const nodeGroup = d3.select(this);
+        
+        // Simple node dot
+        nodeGroup.append('circle')
+          .attr('class', 'node-point')
+          .attr('r', 0.8)
+          .attr('fill', '#FF6B6B')
+          .attr('cursor', 'pointer');
+
+        // Interactive hover effects
+        nodeGroup.on('mouseenter', function() {
+          d3.select(this).select('.node-point')
+            .transition()
+            .duration(200)
+            .attr('r', 2)
+            .attr('fill', '#0066cc');
+        })
+        .on('mouseleave', function() {
+          d3.select(this).select('.node-point')
+            .transition()
+            .duration(200)
+            .attr('r', 0.8)
+            .attr('fill', '#FF6B6B');
+        });
+      });
+    
 
     // Center and fit the floor plan
     centerFloorPlan(g, floorPlan, width, height);

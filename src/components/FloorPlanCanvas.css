@@ -12,41 +12,62 @@
 }
 
 .floor-plan-canvas-container .wall {
-  stroke: #333;
-  stroke-width: 4;
+  stroke: none;
   cursor: pointer;
 }
 
 .floor-plan-canvas-container .wall:hover {
-  stroke: #0066cc;
+  stroke: none;
   filter: brightness(1.2);
 }
 
 .floor-plan-canvas-container .door {
-  stroke: #8B4513;
-  stroke-width: 3;
-  stroke-dasharray: 5, 5;
+  stroke: none;
   cursor: pointer;
 }
 
 .floor-plan-canvas-container .door:hover {
-  stroke: #D2691E;
+  stroke: none;
   filter: brightness(1.2);
 }
 
 .floor-plan-canvas-container .window {
-  stroke: #87CEEB;
-  stroke-width: 2;
+  stroke: none;
   cursor: pointer;
 }
 
 .floor-plan-canvas-container .window:hover {
-  stroke: #4169E1;
+  stroke: none;
   filter: brightness(1.2);
 }
 
-.floor-plan-canvas-container .node {
-  fill: #333;
+.floor-plan-canvas-container .node-point {
+  fill: #FF6B6B;
   stroke: #fff;
-  stroke-width: 2;
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: r 0.2s ease, opacity 0.2s ease;
+}
+
+.floor-plan-canvas-container .node-point:hover {
+  filter: brightness(1.15);
+}
+
+.floor-plan-canvas-container .node-glow {
+  stroke: #FF6B6B;
+  stroke-width: 1;
+  transition: r 0.2s ease, opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.floor-plan-canvas-container .node-group {
+  cursor: pointer;
+}
+
+.floor-plan-canvas-container .node-label {
+  font-size: 7px;
+  font-weight: bold;
+  fill: #333;
+  pointer-events: none;
+  user-select: none;
 }
