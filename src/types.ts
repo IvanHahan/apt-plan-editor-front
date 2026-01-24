@@ -41,6 +41,7 @@ export interface Room {
   id: string;
   polygon_coords: [number, number][];
   tags: string[];
+  locked?: boolean; // For redesign mode
 }
 
 /**

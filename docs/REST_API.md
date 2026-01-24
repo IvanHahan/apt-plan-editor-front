@@ -49,7 +49,8 @@ Returns general API information and available endpoints.
   "name": "Floor Plan Editor API",
   "version": "1.0.0",
   "endpoints": {
-    "POST /process_plan_image": "Process a floor plan image (legacy endpoint)",
+    "POST /floor-plans/process-image": "Process a floor plan image",
+    "POST /floor-plans/{plan_id}/lock-rooms": "Lock rooms for redesign",
     "GET /health": "Health check",
     ...
   }
@@ -197,6 +198,49 @@ Update user information.
 ### Delete User
 
 #### DELETE /users/{user_id}
+
+Delete a user account.
+
+**Response (204 No Content)**
+
+---
+
+## Floor Plans API
+
+### Lock Rooms
+
+#### POST /floor-plans/{plan_id}/lock-rooms
+
+Lock specific rooms to prevent modifications during layout redesign. Locked state is session-based (in-memory) and scoped per user/plan.
+
+**Parameters:**
+- `plan_id` (string, path, required): UUID of the floor plan
+
+**Request Body:**
+```json
+{
+  "room_ids": ["room-uuid-1", "room-uuid-2"]
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "locked_room_ids": ["room-uuid-1", "room-uuid-2"],
+  "total_requested": 2
+}
+```
+
+**Error Responses:**
+- `404 Not Found`: Floor plan or room not found
+- `400 Bad Request`: Room doesn't belong to specified floor plan
+
+**Notes:**
+- Lock state is cleared on server restart
+- Each user has independent locking state per floor plan
+- Future: Will migrate to Redis for distributed sessions
+
+---
 
 Delete a user account.
 

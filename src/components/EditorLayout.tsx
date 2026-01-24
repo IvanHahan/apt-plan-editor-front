@@ -21,6 +21,10 @@ export const EditorLayout: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Redesign mode state
+  const [isRedesignMode, setIsRedesignMode] = useState(false);
+  const [redesignDesires, setRedesignDesires] = useState('');
 
   // Load user's plans on mount
   React.useEffect(() => {
@@ -156,6 +160,47 @@ export const EditorLayout: React.FC = () => {
     }
   };
 
+  const handleToggleRedesignMode = () => {
+    setIsRedesignMode(!isRedesignMode);
+    if (isRedesignMode) {
+      // Exiting redesign mode - clear state
+      setRedesignDesires('');
+      // Unlock all rooms
+      if (floorPlan.rooms) {
+        setFloorPlan({
+          ...floorPlan,
+          rooms: floorPlan.rooms.map(room => ({ ...room, locked: false }))
+        });
+      }
+    }
+  };
+
+  const handleToggleRoomLock = (roomId: string) => {
+    if (!floorPlan.rooms) return;
+    setFloorPlan({
+      ...floorPlan,
+      rooms: floorPlan.rooms.map(room => 
+        room.id === roomId ? { ...room, locked: !room.locked } : room
+      )
+    });
+  };
+
+  const handleRedesignSubmit = () => {
+    if (!redesignDesires.trim()) {
+      alert('Please describe your design desires before submitting.');
+      return;
+    }
+    
+    const lockedRooms = floorPlan.rooms?.filter(r => r.locked) || [];
+    console.log('Submitting redesign request:', {
+      desires: redesignDesires,
+      lockedRoomIds: lockedRooms.map(r => r.id)
+    });
+    
+    // TODO: API call will go here
+    alert(`Redesign request submitted!\n\nDesires: ${redesignDesires}\nLocked rooms: ${lockedRooms.length}`);
+  };
+
   return (
     <div className="app-container">
       {/* Hidden file input */}
@@ -175,6 +220,16 @@ export const EditorLayout: React.FC = () => {
             {isUploading ? 'Uploading...' : 'Upload Image'}
           </button>
           <button onClick={handleResetZoom}>Reset Zoom</button>
+          <button 
+            onClick={handleToggleRedesignMode}
+            style={{
+              backgroundColor: isRedesignMode ? '#4CAF50' : '#fff',
+              color: isRedesignMode ? '#fff' : '#000',
+              fontWeight: isRedesignMode ? 'bold' : 'normal'
+            }}
+          >
+            {isRedesignMode ? '✓ Redesign Mode' : 'Redesign Mode'}
+          </button>
           <button 
             onClick={handleDeletePlan} 
             disabled={!currentPlanId}
@@ -246,10 +301,32 @@ export const EditorLayout: React.FC = () => {
 
         {/* Middle Panel: Canvas */}
         <div className="panel panel-middle">
-          <div id="canvas-container">
+          <div id="canvas-container" style={{ 
+            position: 'relative',
+            border: isRedesignMode ? '3px solid #4CAF50' : 'none',
+            borderRadius: isRedesignMode ? '8px' : '0'
+          }}>
+            {isRedesignMode && (
+              <div style={{
+                position: 'absolute',
+                top: '10px',
+                left: '10px',
+                backgroundColor: '#4CAF50',
+                color: 'white',
+                padding: '8px 16px',
+                borderRadius: '4px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                zIndex: 1000,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+              }}>
+                🎨 Redesign Mode Active - Click rooms to lock/unlock
+              </div>
+            )}
             <FloorPlanCanvas
               floorPlan={floorPlan}
               onEdgeClick={() => {}}
+              onRoomClick={isRedesignMode ? handleToggleRoomLock : undefined}
             />
           </div>
         </div>
@@ -260,24 +337,125 @@ export const EditorLayout: React.FC = () => {
           onMouseDown={(e) => handleMouseDown(e, 'right')}
         />
 
-        {/* Right Panel: Roomly Live Assistant */}
+        {/* Right Panel: Roomly Live Assistant / Redesign Panel */}
         <div className="panel panel-right" style={{ width: `${rightPanelWidth}px` }}>
-          <h2>Roomly Live Assistant</h2>
-          <div className="assistant-section">
-            <div className="assistant-card">
-              <h3 className="assistant-title">Roomly.Agent</h3>
-              <p className="assistant-message">How many rooms does your apartment have?</p>
-            </div>
-            <div className="assistant-card">
-              <p className="assistant-response">
-                <strong>Ronald</strong><br />
-                5
-              </p>
-            </div>
-            <div className="assistant-footer">
-              <button className="assistant-button">let us know more</button>
-            </div>
-          </div>
+          {isRedesignMode ? (
+            // Redesign Panel
+            <>
+              <h2>🎨 Redesign Configuration</h2>
+              <div className="redesign-panel">
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+                    Describe your design desires:
+                  </label>
+                  <textarea
+                    value={redesignDesires}
+                    onChange={(e) => setRedesignDesires(e.target.value)}
+                    placeholder="e.g., I want a more open kitchen connected to living room, larger master bedroom..."
+                    style={{
+                      width: '100%',
+                      minHeight: '120px',
+                      padding: '10px',
+                      fontSize: '14px',
+                      borderRadius: '4px',
+                      border: '1px solid #ddd',
+                      resize: 'vertical'
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <h3 style={{ fontSize: '16px', marginBottom: '12px' }}>
+                    Lock Rooms (keep unchanged)
+                  </h3>
+                  <div style={{ fontSize: '12px', color: '#666', marginBottom: '8px' }}>
+                    Click rooms on canvas or use checkboxes below
+                  </div>
+                  {!floorPlan.rooms || floorPlan.rooms.length === 0 ? (
+                    <div style={{ color: '#999', fontStyle: 'italic' }}>No rooms detected</div>
+                  ) : (
+                    <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                      {floorPlan.rooms.map((room, index) => (
+                        <div 
+                          key={room.id}
+                          style={{
+                            padding: '8px',
+                            marginBottom: '4px',
+                            backgroundColor: room.locked ? '#e8f5e9' : '#fff3e0',
+                            border: `1px solid ${room.locked ? '#4CAF50' : '#ff9800'}`,
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between'
+                          }}
+                          onClick={() => handleToggleRoomLock(room.id)}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                              type="checkbox"
+                              checked={room.locked || false}
+                              onChange={() => handleToggleRoomLock(room.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <span>
+                              Room {index + 1}
+                              {room.tags && room.tags.length > 0 && (
+                                <span style={{ color: '#666', fontSize: '11px' }}>
+                                  {' '}({room.tags.join(', ')})
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: '16px' }}>
+                            {room.locked ? '🔒' : '🔓'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleRedesignSubmit}
+                  disabled={!redesignDesires.trim()}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    backgroundColor: redesignDesires.trim() ? '#4CAF50' : '#ccc',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: redesignDesires.trim() ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  Submit Redesign Request
+                </button>
+              </div>
+            </>
+          ) : (
+            // Original Assistant Panel
+            <>
+              <h2>Roomly Live Assistant</h2>
+              <div className="assistant-section">
+                <div className="assistant-card">
+                  <h3 className="assistant-title">Roomly.Agent</h3>
+                  <p className="assistant-message">How many rooms does your apartment have?</p>
+                </div>
+                <div className="assistant-card">
+                  <p className="assistant-response">
+                    <strong>Ronald</strong><br />
+                    5
+                  </p>
+                </div>
+                <div className="assistant-footer">
+                  <button className="assistant-button">let us know more</button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -274,47 +274,105 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
     // Draw rooms (if available)
     if (floorPlan.rooms && floorPlan.rooms.length > 0) {
-      g.selectAll('.room')
+      const roomGroups = g.selectAll('.room-group')
         .data(floorPlan.rooms, (d: any) => d.id)
         .enter()
+        .append('g')
+        .attr('class', 'room-group');
+
+      // Room polygons
+      roomGroups
         .append('polygon')
         .attr('class', 'room')
         .attr('points', (d: Room) => 
           d.polygon_coords.map(([x, y]) => `${x},${y}`).join(' ')
         )
         .attr('fill', (d: Room) => {
-          // Generate consistent random color based on room ID
-          const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-          const hue = (hash % 360);
-          const saturation = 60 + (hash % 30);
-          const lightness = 60 + (hash % 20);
-          return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+          // Locked rooms get green overlay, unlocked get orange (in redesign mode)
+          if (d.locked) {
+            return 'rgba(76, 175, 80, 0.4)'; // Green for locked
+          } else if (onRoomClick) {
+            return 'rgba(255, 152, 0, 0.3)'; // Orange for unlocked in redesign mode
+          } else {
+            // Generate consistent random color based on room ID (normal mode)
+            const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const hue = (hash % 360);
+            const saturation = 60 + (hash % 30);
+            const lightness = 60 + (hash % 20);
+            return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+          }
         })
-        .attr('stroke', '#ccc')
-        .attr('stroke-width', 1)
-        .attr('cursor', 'pointer')
+        .attr('stroke', (d: Room) => {
+          if (d.locked) return '#4CAF50';
+          if (onRoomClick) return '#ff9800';
+          return '#ccc';
+        })
+        .attr('stroke-width', (d: Room) => (d.locked || onRoomClick) ? 2 : 1)
+        .attr('cursor', onRoomClick ? 'pointer' : 'default')
         .on('mouseenter', function(_event, d: Room) {
-          const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-          const hue = (hash % 360);
-          const saturation = 60 + (hash % 30);
-          d3.select(this)
-            .attr('fill', `hsl(${hue}, ${saturation}%, 85%)`)
-            .attr('stroke', '#000')
-            .attr('stroke-width', 3);
+          if (onRoomClick) {
+            d3.select(this)
+              .attr('fill', d.locked ? 'rgba(76, 175, 80, 0.6)' : 'rgba(255, 152, 0, 0.5)')
+              .attr('stroke', d.locked ? '#2E7D32' : '#F57C00')
+              .attr('stroke-width', 3);
+          } else {
+            const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const hue = (hash % 360);
+            const saturation = 60 + (hash % 30);
+            d3.select(this)
+              .attr('fill', `hsl(${hue}, ${saturation}%, 85%)`)
+              .attr('stroke', '#000')
+              .attr('stroke-width', 3);
+          }
         })
         .on('mouseleave', function(_event, d: Room) {
-          const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-          const hue = (hash % 360);
-          const saturation = 60 + (hash % 30);
-          const lightness = 60 + (hash % 20);
-          d3.select(this)
-            .attr('fill', `hsl(${hue}, ${saturation}%, ${lightness}%)`)
-            .attr('stroke', '#ccc')
-            .attr('stroke-width', 1);
+          if (onRoomClick) {
+            d3.select(this)
+              .attr('fill', d.locked ? 'rgba(76, 175, 80, 0.4)' : 'rgba(255, 152, 0, 0.3)')
+              .attr('stroke', d.locked ? '#4CAF50' : '#ff9800')
+              .attr('stroke-width', 2);
+          } else {
+            const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const hue = (hash % 360);
+            const saturation = 60 + (hash % 30);
+            const lightness = 60 + (hash % 20);
+            d3.select(this)
+              .attr('fill', `hsl(${hue}, ${saturation}%, ${lightness}%)`)
+              .attr('stroke', '#ccc')
+              .attr('stroke-width', 1);
+          }
         })
         .on('click', function(event, d: Room) {
           event.stopPropagation();
           onRoomClick?.(d.id);
+        });
+
+      // Add lock icon for locked rooms
+      roomGroups
+        .filter((d: Room) => !!(d.locked && onRoomClick))
+        .each(function(d: Room) {
+          const polygon = d.polygon_coords;
+          if (polygon.length === 0) return;
+          
+          // Calculate centroid
+          let sumX = 0, sumY = 0;
+          polygon.forEach(([x, y]) => {
+            sumX += x;
+            sumY += y;
+          });
+          const centroidX = sumX / polygon.length;
+          const centroidY = sumY / polygon.length;
+
+          // Add lock emoji as text
+          d3.select(this)
+            .append('text')
+            .attr('x', centroidX)
+            .attr('y', centroidY)
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .attr('font-size', '24px')
+            .attr('pointer-events', 'none')
+            .text('🔒');
         });
     }
 
@@ -505,7 +563,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       .append('g')
       .attr('class', 'node-group')
       .attr('transform', (d: Node) => `translate(${d.x},${d.y})`)
-      .each(function(d: Node) {
+      .each(function(_d: Node) {
         const nodeGroup = d3.select(this);
         
         // Simple node dot

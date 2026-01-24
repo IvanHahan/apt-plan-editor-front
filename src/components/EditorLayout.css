@@ -167,6 +167,36 @@
   gap: 16px;
 }
 
+/* Redesign Panel Styles */
+.redesign-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.redesign-panel textarea {
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.redesign-panel textarea:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.redesign-panel button:hover:not(:disabled) {
+  background-color: #45a049;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
+}
+
+.redesign-panel button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
 .assistant-card {
   background-color: rgba(255, 255, 255, 0.5);
   border-radius: 12px;
