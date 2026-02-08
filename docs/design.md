@@ -1,7 +1,7 @@
 # design.md
 
-**Version:** 1.0  
-**Last updated:** 2026-01-13  
+**Version:** 1.2  
+**Last updated:** 2026-02-08  
 **Status:** Living document  
 **Authority:** Technical decisions source of truth
 
@@ -77,7 +77,12 @@ Defines technical architecture, design patterns, and implementation guidelines f
 **API Communication:**
 - REST API via fetch (native)
 - Base URL: `http://localhost:8000` (configurable via `.env`)
-- Endpoints: `/floor-plans/process-image`, `/floor-plans/{id}`, `/floor-plans/user/{userId}`
+- Endpoints:
+  - `/floor-plans/process-image` — upload & process image
+  - `/floor-plans/{id}` — get/update/delete floor plan
+  - `/floor-plans/user/{userId}` — list user's plans
+  - `/floor-plans/{id}/redesign` — generate multiple redesign alternatives
+  - `/floor-plans/{id}/alternatives` — list persisted alternatives
 
 **Constraints:**
 - ✅ TypeScript for all code
@@ -114,6 +119,17 @@ Room: { id, polygon_coords, tags }  // Room polygons with classification
 Fixture: { id, polygon_coords, fixture_type, properties? }  // Doors, windows, furniture
 FloorPlan: { nodes[], edges[], rooms?, fixtures? }
 ```
+
+**Redesign types (API client):**
+```typescript
+RedesignRequest: { desires?, rooms?, room_adjacencies?, locked_room_ids?, num_alternatives?, cell_size?, max_solve_time? }
+RedesignResponse: { alternatives: RedesignAlternative[], total }
+RedesignAlternative: { floor_plan: FloorPlanDetail, solve_time, message }
+```
+
+**Redesign modes:**
+- **Desires-based** (primary): Send `desires` (free text) + `locked_room_ids`. Backend LLM extracts constraints automatically.
+- **Explicit**: Send `rooms` + `room_adjacencies` directly. No LLM involved.
 
 **Edge types:** `"wall"`, `"door"`, `"window"` — determines visual styling
 
@@ -175,6 +191,22 @@ FloorPlan: { nodes[], edges[], rooms?, fixtures? }
 - `onEdgeClick` callback wired for future selection/editing
 - Zoom/pan controlled by D3's built-in handlers
 
+### 3.5 Redesign Flow
+1. User enters Redesign Mode via toggle button
+2. User clicks rooms on canvas (or checkboxes) to lock/unlock rooms to preserve
+3. User types free-form desires in the text area (e.g., "I want a larger kitchen connected to the living room")
+4. User clicks "Submit Redesign Request" → `redesignFloorPlan(planId, { desires, locked_room_ids, num_alternatives })`
+5. Backend LLM extracts structured constraints from desires text (with floor plan image + layout context)
+6. Backend runs CP-SAT solver for N alternatives, persists each as a child floor plan
+7. Response contains `RedesignResponse` with list of `RedesignAlternative` objects
+8. Frontend loads the first alternative, exits redesign mode, reloads plan list
+9. Previously generated alternatives are retrievable via `getFloorPlanAlternatives(planId)`
+
+**UI states during redesign:**
+- Button disabled + "Redesigning..." text while API call is in progress
+- Error displayed if extraction or solver fails
+- Success alert with number of alternatives generated
+
 ---
 
 ## 4. File Structure Rationale
@@ -184,7 +216,7 @@ src/
 ├── types.ts          → Single source of truth for data shapes
 ├── data.ts           → Sample/mock data (4-room apartment)
 ├── api/
-│   └── client.ts     → REST API client, typed endpoints
+│   └── client.ts     → REST API client, typed endpoints (incl. redesign & alternatives)
 ├── utils/
 │   └── converter.ts  → API ↔ Frontend data transformation
 ├── components/
@@ -209,3 +241,6 @@ Backend API Response → convertApiToFloorPlan() → FloorPlan → FloorPlanCanv
 - Export to image/PDF
 - Offline mode with local cache
 - Plan sharing & permissions
+- Redesign alternatives comparison UI (side-by-side view)
+- ~~Room locking UI (select rooms to preserve before redesign)~~ ✅ Implemented (click rooms on canvas or checkboxes)
+- ~~Desires-based redesign (free-form text → LLM constraint extraction → solver)~~ ✅ Implemented

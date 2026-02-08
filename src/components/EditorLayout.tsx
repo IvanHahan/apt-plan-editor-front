@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { sampleFloorPlan } from '../data';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, type FloorPlanSummary } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, type FloorPlanSummary } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
 import type { FloorPlan } from '../types';
 import './EditorLayout.css';
@@ -185,20 +185,54 @@ export const EditorLayout: React.FC = () => {
     });
   };
 
-  const handleRedesignSubmit = () => {
+  const [isRedesigning, setIsRedesigning] = useState(false);
+
+  const handleRedesignSubmit = async () => {
     if (!redesignDesires.trim()) {
       alert('Please describe your design desires before submitting.');
       return;
     }
-    
+    if (!currentPlanId) {
+      alert('Please save the floor plan before redesigning.');
+      return;
+    }
+
     const lockedRooms = floorPlan.rooms?.filter(r => r.locked) || [];
-    console.log('Submitting redesign request:', {
-      desires: redesignDesires,
-      lockedRoomIds: lockedRooms.map(r => r.id)
-    });
-    
-    // TODO: API call will go here
-    alert(`Redesign request submitted!\n\nDesires: ${redesignDesires}\nLocked rooms: ${lockedRooms.length}`);
+
+    setIsRedesigning(true);
+    setError(null);
+
+    try {
+      const response = await redesignFloorPlan(currentPlanId, {
+        desires: redesignDesires,
+        locked_room_ids: lockedRooms.map(r => r.id),
+        num_alternatives: 3,
+      });
+
+      if (response.alternatives.length > 0) {
+        // Load the first alternative as the current plan
+        const firstAlt = response.alternatives[0];
+        const converted = convertApiToFloorPlan(firstAlt.floor_plan);
+        setFloorPlan(converted);
+        setCurrentPlanId(firstAlt.floor_plan.id);
+
+        // Exit redesign mode
+        setIsRedesignMode(false);
+        setRedesignDesires('');
+
+        // Reload plans list to show new alternatives
+        await loadUserPlans();
+
+        alert(`Redesign complete! Generated ${response.total} alternative(s).`);
+      } else {
+        setError('No valid alternatives were generated. Try different desires.');
+      }
+    } catch (err) {
+      console.error('Redesign failed:', err);
+      setError(err instanceof Error ? err.message : 'Redesign failed');
+    } finally {
+      setIsRedesigning(false);
+    }
   };
 
   return (
@@ -418,20 +452,20 @@ export const EditorLayout: React.FC = () => {
 
                 <button
                   onClick={handleRedesignSubmit}
-                  disabled={!redesignDesires.trim()}
+                  disabled={!redesignDesires.trim() || isRedesigning}
                   style={{
                     width: '100%',
                     padding: '12px',
                     fontSize: '16px',
                     fontWeight: 'bold',
-                    backgroundColor: redesignDesires.trim() ? '#4CAF50' : '#ccc',
+                    backgroundColor: (!redesignDesires.trim() || isRedesigning) ? '#ccc' : '#4CAF50',
                     color: 'white',
                     border: 'none',
                     borderRadius: '4px',
-                    cursor: redesignDesires.trim() ? 'pointer' : 'not-allowed'
+                    cursor: (!redesignDesires.trim() || isRedesigning) ? 'not-allowed' : 'pointer'
                   }}
                 >
-                  Submit Redesign Request
+                  {isRedesigning ? 'Redesigning...' : 'Submit Redesign Request'}
                 </button>
               </div>
             </>
