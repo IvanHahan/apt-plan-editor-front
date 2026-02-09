@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { sampleFloorPlan } from '../data';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, type FloorPlanSummary } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, type FloorPlanSummary } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
 import type { FloorPlan } from '../types';
 import './EditorLayout.css';
@@ -25,6 +25,12 @@ export const EditorLayout: React.FC = () => {
   // Redesign mode state
   const [isRedesignMode, setIsRedesignMode] = useState(false);
   const [redesignDesires, setRedesignDesires] = useState('');
+
+  // Measurement / scale normalization state
+  const [isMeasureMode, setIsMeasureMode] = useState(false);
+  const [measuredPixelDistance, setMeasuredPixelDistance] = useState<number | null>(null);
+  const [metersInput, setMetersInput] = useState('');
+  const [isNormalizingScale, setIsNormalizingScale] = useState(false);
 
   // Load user's plans on mount
   React.useEffect(() => {
@@ -80,7 +86,6 @@ export const EditorLayout: React.FC = () => {
   const handleLoadPlan = async (planId: string) => {
     setError(null);
     try {
-      const { getFloorPlan } = await import('../api/client');
       const apiPlan = await getFloorPlan(planId);
       const convertedPlan = convertApiToFloorPlan(apiPlan);
       setFloorPlan(convertedPlan);
@@ -235,6 +240,77 @@ export const EditorLayout: React.FC = () => {
     }
   };
 
+  const handleToggleMeasureMode = () => {
+    if (isMeasureMode) {
+      // Exit measure mode
+      setIsMeasureMode(false);
+      setMeasuredPixelDistance(null);
+      setMetersInput('');
+    } else {
+      // Enter measure mode (exit redesign mode if active)
+      setIsRedesignMode(false);
+      setIsMeasureMode(true);
+      setMeasuredPixelDistance(null);
+      setMetersInput('');
+    }
+  };
+
+  const handleMeasure = (pixelDistance: number) => {
+    setMeasuredPixelDistance(pixelDistance);
+  };
+
+  const handleRemeasure = () => {
+    setMeasuredPixelDistance(null);
+    setMetersInput('');
+  };
+
+  // Escape key resets measurement (or exits measure mode if no measurement yet)
+  React.useEffect(() => {
+    if (!isMeasureMode) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (measuredPixelDistance) {
+          handleRemeasure();
+        } else {
+          setIsMeasureMode(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMeasureMode, measuredPixelDistance]);
+
+  const handleApplyScale = async () => {
+    const meters = parseFloat(metersInput);
+    if (!meters || meters <= 0 || !measuredPixelDistance || !currentPlanId) return;
+
+    const pixelsPerMeter = measuredPixelDistance / meters;
+
+    setIsNormalizingScale(true);
+    setError(null);
+
+    try {
+      await normalizeScale(currentPlanId, pixelsPerMeter);
+
+      // Reload the floor plan with new coordinates
+      const apiPlan = await getFloorPlan(currentPlanId);
+      const converted = convertApiToFloorPlan(apiPlan);
+      setFloorPlan(converted);
+
+      // Exit measure mode
+      setIsMeasureMode(false);
+      setMeasuredPixelDistance(null);
+      setMetersInput('');
+    } catch (err) {
+      console.error('Scale normalization failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to normalize scale');
+    } finally {
+      setIsNormalizingScale(false);
+    }
+  };
+
+  const canSetScale = !!currentPlanId;
+
   return (
     <div className="app-container">
       {/* Hidden file input */}
@@ -264,6 +340,19 @@ export const EditorLayout: React.FC = () => {
           >
             {isRedesignMode ? '✓ Redesign Mode' : 'Redesign Mode'}
           </button>
+          {canSetScale && (
+            <button
+              onClick={handleToggleMeasureMode}
+              style={{
+                backgroundColor: isMeasureMode ? '#e53935' : '#fff',
+                color: isMeasureMode ? '#fff' : '#e53935',
+                fontWeight: isMeasureMode ? 'bold' : 'normal',
+                borderColor: '#e53935'
+              }}
+            >
+              {isMeasureMode ? '✕ Cancel Measure' : '📏 Set Scale'}
+            </button>
+          )}
           <button 
             onClick={handleDeletePlan} 
             disabled={!currentPlanId}
@@ -337,8 +426,8 @@ export const EditorLayout: React.FC = () => {
         <div className="panel panel-middle">
           <div id="canvas-container" style={{ 
             position: 'relative',
-            border: isRedesignMode ? '3px solid #4CAF50' : 'none',
-            borderRadius: isRedesignMode ? '8px' : '0'
+            border: isRedesignMode ? '3px solid #4CAF50' : isMeasureMode ? '3px solid #e53935' : 'none',
+            borderRadius: (isRedesignMode || isMeasureMode) ? '8px' : '0'
           }}>
             {isRedesignMode && (
               <div style={{
@@ -357,10 +446,55 @@ export const EditorLayout: React.FC = () => {
                 🎨 Redesign Mode Active - Click rooms to lock/unlock
               </div>
             )}
+            {isMeasureMode && (
+              <div className="measure-overlay">
+                <div className="measure-banner">
+                  {!measuredPixelDistance
+                    ? '📏 Click two points on a wall to measure it'
+                    : '📏 Measurement complete — enter the real length below'}
+                </div>
+                {measuredPixelDistance && (
+                  <div className="measure-input-panel">
+                    <span className="measure-distance">
+                      Measured: {measuredPixelDistance.toFixed(1)} px
+                    </span>
+                    <div className="measure-input-row">
+                      <label>Real length (m):</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={metersInput}
+                        onChange={(e) => setMetersInput(e.target.value)}
+                        placeholder="e.g. 3.5"
+                        className="measure-input"
+                        autoFocus
+                      />
+                      <button
+                        onClick={handleApplyScale}
+                        disabled={!metersInput || parseFloat(metersInput) <= 0 || isNormalizingScale}
+                        className="measure-apply-btn"
+                      >
+                        {isNormalizingScale ? 'Applying...' : 'Apply Scale'}
+                      </button>
+                      <button
+                        onClick={handleRemeasure}
+                        className="measure-remeasure-btn"
+                        title="Remeasure (Esc)"
+                      >
+                        Remeasure
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <FloorPlanCanvas
               floorPlan={floorPlan}
               onEdgeClick={() => {}}
               onRoomClick={isRedesignMode ? handleToggleRoomLock : undefined}
+              measureMode={isMeasureMode}
+              onMeasure={handleMeasure}
             />
           </div>
         </div>

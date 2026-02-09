@@ -290,6 +290,38 @@ export async function getFloorPlanAlternatives(
 }
 
 /**
+ * Normalize scale response
+ */
+export interface NormalizeScaleResponse {
+  id: string;
+  previous_unit_scale: number;
+  new_unit_scale: number;
+  scale_factor: number;
+  message: string;
+}
+
+/**
+ * Normalize floor plan scale from pixels to meters
+ */
+export async function normalizeScale(
+  planId: string,
+  pixelsPerMeter: number
+): Promise<NormalizeScaleResponse> {
+  const response = await fetch(`${API_BASE_URL}/floor-plans/${planId}/normalize-scale`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pixels_per_meter: pixelsPerMeter }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to normalize scale' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
  * Health check
  */
 export async function healthCheck(): Promise<{ status: string }> {

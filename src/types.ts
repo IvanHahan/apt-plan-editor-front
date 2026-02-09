@@ -62,4 +62,5 @@ export interface FloorPlan {
   edges: Edge[];
   rooms?: Room[];
   fixtures?: Fixture[];
+  unit_scale?: number;
 }

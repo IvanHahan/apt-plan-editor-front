@@ -1,7 +1,7 @@
 # design.md
 
-**Version:** 1.2  
-**Last updated:** 2026-02-08  
+**Version:** 1.3  
+**Last updated:** 2026-02-09  
 **Status:** Living document  
 **Authority:** Technical decisions source of truth
 
@@ -81,6 +81,7 @@ Defines technical architecture, design patterns, and implementation guidelines f
   - `/floor-plans/process-image` — upload & process image
   - `/floor-plans/{id}` — get/update/delete floor plan
   - `/floor-plans/user/{userId}` — list user's plans
+  - `/floor-plans/{id}/normalize-scale` — normalize coordinates from pixels to meters
   - `/floor-plans/{id}/redesign` — generate multiple redesign alternatives
   - `/floor-plans/{id}/alternatives` — list persisted alternatives
 
@@ -117,7 +118,7 @@ Node: { id, x, y }          // Junction points
 Edge: { id, source, target, type, thickness?, is_inner?, properties? }
 Room: { id, polygon_coords, tags }  // Room polygons with classification
 Fixture: { id, polygon_coords, fixture_type, properties? }  // Doors, windows, furniture
-FloorPlan: { nodes[], edges[], rooms?, fixtures? }
+FloorPlan: { nodes[], edges[], rooms?, fixtures?, unit_scale? }
 ```
 
 **Redesign types (API client):**
@@ -191,7 +192,24 @@ RedesignAlternative: { floor_plan: FloorPlanDetail, solve_time, message }
 - `onEdgeClick` callback wired for future selection/editing
 - Zoom/pan controlled by D3's built-in handlers
 
-### 3.5 Redesign Flow
+### 3.5 Scale Normalization Flow
+1. User loads a floor plan from the backend (coordinates in pixels, `unit_scale != 1.0`)
+2. "📏 Set Scale" button appears in the header bar
+3. User clicks it → enters **measure mode** (red border, crosshair cursor)
+4. Banner: "Click two points on a wall to measure it"
+5. User clicks two points on the canvas → red dashed line drawn, pixel distance displayed
+6. Input panel appears: user enters the real-world length in meters
+7. User clicks "Apply Scale" → `normalizeScale(planId, pixelsPerMeter)` called
+8. Backend rescales all coordinates (nodes, edges, rooms, fixtures), sets `unit_scale = 1.0`
+9. Frontend reloads the plan with meter-based coordinates
+
+**Measure mode details:**
+- Capture-phase click listener ensures clicks work on all elements (walls, rooms, etc.)
+- "Remeasure" button or **Escape** key resets measurement for re-selection
+- Escape with no measurement exits measure mode entirely
+- Measurement overlay (line + distance label) rendered in a separate SVG group (`measureGRef`) that persists across floor plan redraws
+
+### 3.6 Redesign Flow
 1. User enters Redesign Mode via toggle button
 2. User clicks rooms on canvas (or checkboxes) to lock/unlock rooms to preserve
 3. User types free-form desires in the text area (e.g., "I want a larger kitchen connected to the living room")
@@ -244,3 +262,4 @@ Backend API Response → convertApiToFloorPlan() → FloorPlan → FloorPlanCanv
 - Redesign alternatives comparison UI (side-by-side view)
 - ~~Room locking UI (select rooms to preserve before redesign)~~ ✅ Implemented (click rooms on canvas or checkboxes)
 - ~~Desires-based redesign (free-form text → LLM constraint extraction → solver)~~ ✅ Implemented
+- ~~Scale normalization (measurement tool → pixels-to-meters conversion)~~ ✅ Implemented

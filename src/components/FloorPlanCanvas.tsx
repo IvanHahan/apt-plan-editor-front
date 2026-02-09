@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { FloorPlan, Node, Edge, Room, Fixture } from '../types';
 import './FloorPlanCanvas.css';
@@ -7,6 +7,8 @@ interface FloorPlanCanvasProps {
   floorPlan: FloorPlan;
   onEdgeClick?: (edgeId: string) => void;
   onRoomClick?: (roomId: string) => void;
+  measureMode?: boolean;
+  onMeasure?: (pixelDistance: number) => void;
 }
 
 // ============================================
@@ -237,13 +239,133 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   floorPlan,
   onEdgeClick,
   onRoomClick,
+  measureMode,
+  onMeasure,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
+  const drawGRef = useRef<SVGGElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const measureGRef = useRef<SVGGElement>(null);
+
+  const [measurePoint1, setMeasurePoint1] = useState<Point | null>(null);
+  const [measurePoint2, setMeasurePoint2] = useState<Point | null>(null);
+
+  // Reset measurement when mode changes
+  useEffect(() => {
+    if (!measureMode) {
+      setMeasurePoint1(null);
+      setMeasurePoint2(null);
+      if (measureGRef.current) {
+        d3.select(measureGRef.current).selectAll('*').remove();
+      }
+    }
+  }, [measureMode]);
+
+  // Draw measurement line when points change
+  useEffect(() => {
+    if (!measureGRef.current) return;
+    const mg = d3.select(measureGRef.current);
+    mg.selectAll('*').remove();
+
+    if (measurePoint1) {
+      // Draw first point marker
+      mg.append('circle')
+        .attr('cx', measurePoint1.x)
+        .attr('cy', measurePoint1.y)
+        .attr('r', 1.5)
+        .attr('fill', '#e53935')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 0.5);
+    }
+
+    if (measurePoint1 && measurePoint2) {
+      const dist = vecLen(vecSub(measurePoint2, measurePoint1));
+
+      // Draw second point marker
+      mg.append('circle')
+        .attr('cx', measurePoint2.x)
+        .attr('cy', measurePoint2.y)
+        .attr('r', 1.5)
+        .attr('fill', '#e53935')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 0.5);
+
+      // Draw dashed measurement line
+      mg.append('line')
+        .attr('x1', measurePoint1.x)
+        .attr('y1', measurePoint1.y)
+        .attr('x2', measurePoint2.x)
+        .attr('y2', measurePoint2.y)
+        .attr('stroke', '#e53935')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '3,2');
+
+      // Draw distance label at midpoint
+      const midX = (measurePoint1.x + measurePoint2.x) / 2;
+      const midY = (measurePoint1.y + measurePoint2.y) / 2;
+
+      mg.append('rect')
+        .attr('x', midX - 20)
+        .attr('y', midY - 8)
+        .attr('width', 40)
+        .attr('height', 16)
+        .attr('rx', 3)
+        .attr('fill', 'rgba(229, 57, 53, 0.9)');
+
+      mg.append('text')
+        .attr('x', midX)
+        .attr('y', midY + 4)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#fff')
+        .attr('font-size', '8px')
+        .attr('font-weight', 'bold')
+        .text(`${dist.toFixed(1)} px`);
+
+      onMeasure?.(dist);
+    }
+  }, [measurePoint1, measurePoint2, onMeasure]);
+
+  // Handle measurement clicks via capturing listener so it fires
+  // before child elements' stopPropagation can block it
+  const measureStateRef = useRef({ measurePoint1, measurePoint2 });
+  measureStateRef.current = { measurePoint1, measurePoint2 };
 
   useEffect(() => {
-    if (!svgRef.current || !gRef.current) return;
+    if (!measureMode || !svgRef.current || !gRef.current) return;
+
+    const svg = svgRef.current;
+    const gElement = gRef.current;
+
+    const handleMeasureClick = (event: MouseEvent) => {
+      event.stopPropagation();
+      event.preventDefault();
+
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+
+      const ctm = gElement.getScreenCTM();
+      if (!ctm) return;
+      const transformedPoint = point.matrixTransform(ctm.inverse());
+      const dataPoint: Point = { x: transformedPoint.x, y: transformedPoint.y };
+
+      const { measurePoint1: p1, measurePoint2: p2 } = measureStateRef.current;
+      if (!p1 || p2) {
+        setMeasurePoint1(dataPoint);
+        setMeasurePoint2(null);
+      } else {
+        setMeasurePoint2(dataPoint);
+      }
+    };
+
+    // Use capture phase so this fires before any child stopPropagation
+    svg.addEventListener('click', handleMeasureClick, true);
+    return () => svg.removeEventListener('click', handleMeasureClick, true);
+  }, [measureMode]);
+
+  useEffect(() => {
+    if (!svgRef.current || !gRef.current || !drawGRef.current) return;
 
     const container = svgRef.current.parentElement;
     if (!container) return;
@@ -251,15 +373,16 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Clear previous content
-    d3.select(gRef.current).selectAll('*').remove();
+    // Clear previous drawing content (not measurement overlay)
+    d3.select(drawGRef.current).selectAll('*').remove();
 
     // Setup SVG
     const svg = d3.select(svgRef.current)
       .attr('width', width)
       .attr('height', height);
 
-    const g = d3.select(gRef.current);
+    const g = d3.select(gRef.current); // zoom container
+    const drawG = d3.select(drawGRef.current); // drawing container
 
     // Setup zoom
     if (!zoomRef.current) {
@@ -274,7 +397,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
     // Draw rooms (if available)
     if (floorPlan.rooms && floorPlan.rooms.length > 0) {
-      const roomGroups = g.selectAll('.room-group')
+      const roomGroups = drawG.selectAll('.room-group')
         .data(floorPlan.rooms, (d: any) => d.id)
         .enter()
         .append('g')
@@ -397,7 +520,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           .map(p => `${p.x},${p.y}`)
           .join(' ');
 
-        g.append('polygon')
+        drawG.append('polygon')
           .attr('class', 'wall')
           .attr('points', pointsStr)
           .attr('fill', '#333')
@@ -426,7 +549,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       if (edge.geometries && edge.geometries.length > 0) {
         // Render using polygon geometries from backend
         edge.geometries.forEach((geom) => {
-          g.append('polygon')
+          drawG.append('polygon')
             .attr('class', 'door')
             .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
             .attr('fill', '#8B4513')
@@ -452,7 +575,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           thickness
         );
 
-        g.append('polygon')
+        drawG.append('polygon')
           .attr('class', 'door')
           .attr('points', doorPolygon.map(p => `${p.x},${p.y}`).join(' '))
           .attr('fill', '#D2691E')
@@ -470,7 +593,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           Math.pow(targetNode.y - sourceNode.y, 2)
         );
         
-        g.append('path')
+        drawG.append('path')
           .attr('class', 'door-arc')
           .attr('d', createDoorArc(sourceNode.x, sourceNode.y, targetNode.x, targetNode.y, doorLength * 0.4))
           .attr('fill', 'none')
@@ -485,7 +608,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       if (edge.geometries && edge.geometries.length > 0) {
         // Render using polygon geometries from backend
         edge.geometries.forEach((geom) => {
-          g.append('polygon')
+          drawG.append('polygon')
             .attr('class', 'window')
             .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
             .attr('fill', '#87CEEB')
@@ -512,7 +635,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         );
 
         // Window frame
-        g.append('polygon')
+        drawG.append('polygon')
           .attr('class', 'window')
           .attr('points', windowPolygon.map(p => `${p.x},${p.y}`).join(' '))
           .attr('fill', '#B0E0E6')
@@ -525,7 +648,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           });
 
         // Add center line for window glass effect
-        g.append('line')
+        drawG.append('line')
           .attr('class', 'window-glass')
           .attr('x1', sourceNode.x)
           .attr('y1', sourceNode.y)
@@ -538,7 +661,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
     // Draw fixtures (if available)
     if (floorPlan.fixtures && floorPlan.fixtures.length > 0) {
-      g.selectAll('.fixture')
+      drawG.selectAll('.fixture')
         .data(floorPlan.fixtures, (d: any) => d.id)
         .enter()
         .append('polygon')
@@ -557,7 +680,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     }
 
     // Draw node points visualization
-    g.selectAll('.node-group')
+    drawG.selectAll('.node-group')
       .data(floorPlan.nodes, (d: any) => d.id)
       .enter()
       .append('g')
@@ -592,13 +715,19 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     
 
     // Center and fit the floor plan
-    centerFloorPlan(g, floorPlan, width, height);
+    centerFloorPlan(drawG, floorPlan, width, height);
   }, [floorPlan, onEdgeClick, onRoomClick]);
 
   return (
     <div className="floor-plan-canvas-container">
-      <svg ref={svgRef}>
-        <g ref={gRef} />
+      <svg
+        ref={svgRef}
+        style={{ cursor: measureMode ? 'crosshair' : undefined }}
+      >
+        <g ref={gRef}>
+          <g ref={drawGRef} />
+          <g ref={measureGRef} />
+        </g>
       </svg>
     </div>
   );
@@ -667,7 +796,9 @@ function centerFloorPlan(
     .translate(translateX, translateY)
     .scale(scale);
 
-  const svgElement = g.node()?.parentElement as SVGSVGElement | null;
+  // Navigate up from drawG -> gRef -> svg
+  const gElement = g.node()?.parentElement;
+  const svgElement = gElement?.parentElement as SVGSVGElement | null;
   if (svgElement) {
     d3.select(svgElement)
       .transition()
