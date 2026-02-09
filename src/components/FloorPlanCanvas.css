@@ -44,9 +44,9 @@
 .floor-plan-canvas-container .node-point {
   fill: #FF6B6B;
   stroke: #fff;
-  stroke-width: 1.5;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
   cursor: pointer;
-  transition: r 0.2s ease, opacity 0.2s ease;
 }
 
 .floor-plan-canvas-container .node-point:hover {
@@ -55,8 +55,8 @@
 
 .floor-plan-canvas-container .node-glow {
   stroke: #FF6B6B;
-  stroke-width: 1;
-  transition: r 0.2s ease, opacity 0.2s ease;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
 

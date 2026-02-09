@@ -268,15 +268,26 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     const mg = d3.select(measureGRef.current);
     mg.selectAll('*').remove();
 
+    // Compute data-space unit for proportional sizing
+    let mDataExtent = 1;
+    if (floorPlan.nodes.length > 0) {
+      const xs = floorPlan.nodes.map((n: Node) => n.x);
+      const ys = floorPlan.nodes.map((n: Node) => n.y);
+      const dx = Math.max(...xs) - Math.min(...xs);
+      const dy = Math.max(...ys) - Math.min(...ys);
+      mDataExtent = Math.max(dx, dy, 1);
+    }
+    const mu = mDataExtent / 500;
+
     if (measurePoint1) {
       // Draw first point marker
       mg.append('circle')
         .attr('cx', measurePoint1.x)
         .attr('cy', measurePoint1.y)
-        .attr('r', 1.5)
+        .attr('r', 1.5 * mu)
         .attr('fill', '#e53935')
         .attr('stroke', '#fff')
-        .attr('stroke-width', 0.5);
+        .attr('stroke-width', 0.5 * mu);
     }
 
     if (measurePoint1 && measurePoint2) {
@@ -286,10 +297,10 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       mg.append('circle')
         .attr('cx', measurePoint2.x)
         .attr('cy', measurePoint2.y)
-        .attr('r', 1.5)
+        .attr('r', 1.5 * mu)
         .attr('fill', '#e53935')
         .attr('stroke', '#fff')
-        .attr('stroke-width', 0.5);
+        .attr('stroke-width', 0.5 * mu);
 
       // Draw dashed measurement line
       mg.append('line')
@@ -298,33 +309,33 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .attr('x2', measurePoint2.x)
         .attr('y2', measurePoint2.y)
         .attr('stroke', '#e53935')
-        .attr('stroke-width', 1)
-        .attr('stroke-dasharray', '3,2');
+        .attr('stroke-width', 1 * mu)
+        .attr('stroke-dasharray', `${3 * mu},${2 * mu}`);
 
       // Draw distance label at midpoint
       const midX = (measurePoint1.x + measurePoint2.x) / 2;
       const midY = (measurePoint1.y + measurePoint2.y) / 2;
 
       mg.append('rect')
-        .attr('x', midX - 20)
-        .attr('y', midY - 8)
-        .attr('width', 40)
-        .attr('height', 16)
-        .attr('rx', 3)
+        .attr('x', midX - 20 * mu)
+        .attr('y', midY - 8 * mu)
+        .attr('width', 40 * mu)
+        .attr('height', 16 * mu)
+        .attr('rx', 3 * mu)
         .attr('fill', 'rgba(229, 57, 53, 0.9)');
 
       mg.append('text')
         .attr('x', midX)
-        .attr('y', midY + 4)
+        .attr('y', midY + 4 * mu)
         .attr('text-anchor', 'middle')
         .attr('fill', '#fff')
-        .attr('font-size', '8px')
+        .attr('font-size', `${8 * mu}px`)
         .attr('font-weight', 'bold')
         .text(`${dist.toFixed(1)} px`);
 
       onMeasure?.(dist);
     }
-  }, [measurePoint1, measurePoint2, onMeasure]);
+  }, [measurePoint1, measurePoint2, onMeasure, floorPlan.nodes]);
 
   // Handle measurement clicks via capturing listener so it fires
   // before child elements' stopPropagation can block it
@@ -384,16 +395,34 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     const g = d3.select(gRef.current); // zoom container
     const drawG = d3.select(drawGRef.current); // drawing container
 
-    // Setup zoom
-    if (!zoomRef.current) {
-      zoomRef.current = d3.zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.5, 5])
-        .on('zoom', (event) => {
-          g.attr('transform', event.transform.toString());
-        });
+    // Setup zoom (recreate to capture latest drawGRef for node scaling)
+    zoomRef.current = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.1, 500])
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform.toString());
+        // Keep node indicators at fixed screen-pixel size
+        const k = event.transform.k;
+        d3.select(drawGRef.current).selectAll('.node-point')
+          .attr('r', 3 / k);
+      });
 
-      svg.call(zoomRef.current);
+    svg.call(zoomRef.current);
+
+    // Build node map for efficient lookup
+    const nodeMap = new Map<string, Node>();
+    floorPlan.nodes.forEach(node => nodeMap.set(node.id, node));
+
+    // Compute a data-space unit for proportional sizing
+    // This ensures stroke widths, node radii, etc. look correct regardless of coordinate scale
+    let dataExtent = 1;
+    if (floorPlan.nodes.length > 0) {
+      const xs = floorPlan.nodes.map((n: Node) => n.x);
+      const ys = floorPlan.nodes.map((n: Node) => n.y);
+      const dx = Math.max(...xs) - Math.min(...xs);
+      const dy = Math.max(...ys) - Math.min(...ys);
+      dataExtent = Math.max(dx, dy, 1);
     }
+    const dataUnit = dataExtent / 500;
 
     // Draw rooms (if available)
     if (floorPlan.rooms && floorPlan.rooms.length > 0) {
@@ -430,14 +459,14 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           if (onRoomClick) return '#ff9800';
           return '#ccc';
         })
-        .attr('stroke-width', (d: Room) => (d.locked || onRoomClick) ? 2 : 1)
+        .attr('stroke-width', (d: Room) => (d.locked || onRoomClick) ? 2 * dataUnit : 1 * dataUnit)
         .attr('cursor', onRoomClick ? 'pointer' : 'default')
         .on('mouseenter', function(_event, d: Room) {
           if (onRoomClick) {
             d3.select(this)
               .attr('fill', d.locked ? 'rgba(76, 175, 80, 0.6)' : 'rgba(255, 152, 0, 0.5)')
               .attr('stroke', d.locked ? '#2E7D32' : '#F57C00')
-              .attr('stroke-width', 3);
+              .attr('stroke-width', 3 * dataUnit);
           } else {
             const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
             const hue = (hash % 360);
@@ -445,7 +474,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             d3.select(this)
               .attr('fill', `hsl(${hue}, ${saturation}%, 85%)`)
               .attr('stroke', '#000')
-              .attr('stroke-width', 3);
+              .attr('stroke-width', 3 * dataUnit);
           }
         })
         .on('mouseleave', function(_event, d: Room) {
@@ -453,7 +482,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             d3.select(this)
               .attr('fill', d.locked ? 'rgba(76, 175, 80, 0.4)' : 'rgba(255, 152, 0, 0.3)')
               .attr('stroke', d.locked ? '#4CAF50' : '#ff9800')
-              .attr('stroke-width', 2);
+              .attr('stroke-width', 2 * dataUnit);
           } else {
             const hash = d.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
             const hue = (hash % 360);
@@ -462,7 +491,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             d3.select(this)
               .attr('fill', `hsl(${hue}, ${saturation}%, ${lightness}%)`)
               .attr('stroke', '#ccc')
-              .attr('stroke-width', 1);
+              .attr('stroke-width', 1 * dataUnit);
           }
         })
         .on('click', function(event, d: Room) {
@@ -493,7 +522,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .attr('y', centroidY)
             .attr('text-anchor', 'middle')
             .attr('dominant-baseline', 'middle')
-            .attr('font-size', '24px')
+            .attr('font-size', `${24 * dataUnit}px`)
             .attr('pointer-events', 'none')
             .text('🔒');
         });
@@ -504,10 +533,6 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     const walls = floorPlan.edges.filter((e: Edge) => e.type === 'wall');
     const doors = floorPlan.edges.filter((e: Edge) => e.type === 'door');
     const windows = floorPlan.edges.filter((e: Edge) => e.type === 'window');
-
-    // Build node map for efficient lookup
-    const nodeMap = new Map<string, Node>();
-    floorPlan.nodes.forEach(node => nodeMap.set(node.id, node));
 
     // Compute wall polygons with proper corners and junctions
     const wallPolygons = computeWallPolygons(walls, nodeMap);
@@ -554,7 +579,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
             .attr('fill', '#8B4513')
             .attr('stroke', '#5C3317')
-            .attr('stroke-width', 0.5)
+            .attr('stroke-width', 0.5 * dataUnit)
             .attr('cursor', 'pointer')
             .on('click', function(event) {
               event.stopPropagation();
@@ -580,7 +605,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           .attr('points', doorPolygon.map(p => `${p.x},${p.y}`).join(' '))
           .attr('fill', '#D2691E')
           .attr('stroke', '#8B4513')
-          .attr('stroke-width', 0.5)
+          .attr('stroke-width', 0.5 * dataUnit)
           .attr('cursor', 'pointer')
           .on('click', function(event) {
             event.stopPropagation();
@@ -598,8 +623,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           .attr('d', createDoorArc(sourceNode.x, sourceNode.y, targetNode.x, targetNode.y, doorLength * 0.4))
           .attr('fill', 'none')
           .attr('stroke', '#8B4513')
-          .attr('stroke-width', 0.5)
-          .attr('stroke-dasharray', '2,2');
+          .attr('stroke-width', 0.5 * dataUnit)
+          .attr('stroke-dasharray', `${2 * dataUnit},${2 * dataUnit}`);
       }
     });
 
@@ -613,7 +638,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
             .attr('fill', '#87CEEB')
             .attr('stroke', '#4682B4')
-            .attr('stroke-width', 0.5)
+            .attr('stroke-width', 0.5 * dataUnit)
             .attr('cursor', 'pointer')
             .on('click', function(event) {
               event.stopPropagation();
@@ -640,7 +665,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           .attr('points', windowPolygon.map(p => `${p.x},${p.y}`).join(' '))
           .attr('fill', '#B0E0E6')
           .attr('stroke', '#4682B4')
-          .attr('stroke-width', 0.5)
+          .attr('stroke-width', 0.5 * dataUnit)
           .attr('cursor', 'pointer')
           .on('click', function(event) {
             event.stopPropagation();
@@ -676,10 +701,11 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           return '#999';
         })
         .attr('stroke', '#000')
-        .attr('stroke-width', 0.5);
+        .attr('stroke-width', 0.5 * dataUnit);
     }
 
     // Draw node points visualization
+    // Radius is set to a placeholder; the zoom handler keeps it at 3 screen-pixels
     drawG.selectAll('.node-group')
       .data(floorPlan.nodes, (d: any) => d.id)
       .enter()
@@ -689,33 +715,35 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       .each(function(_d: Node) {
         const nodeGroup = d3.select(this);
         
-        // Simple node dot
+        // Simple node dot (radius will be corrected by zoom handler)
         nodeGroup.append('circle')
           .attr('class', 'node-point')
-          .attr('r', 0.8)
+          .attr('r', 0)
           .attr('fill', '#FF6B6B')
           .attr('cursor', 'pointer');
 
         // Interactive hover effects
         nodeGroup.on('mouseenter', function() {
+          const k = d3.zoomTransform(svgRef.current!).k;
           d3.select(this).select('.node-point')
             .transition()
             .duration(200)
-            .attr('r', 2)
+            .attr('r', 5 / k)
             .attr('fill', '#0066cc');
         })
         .on('mouseleave', function() {
+          const k = d3.zoomTransform(svgRef.current!).k;
           d3.select(this).select('.node-point')
             .transition()
             .duration(200)
-            .attr('r', 0.8)
+            .attr('r', 3 / k)
             .attr('fill', '#FF6B6B');
         });
       });
     
 
     // Center and fit the floor plan
-    centerFloorPlan(drawG, floorPlan, width, height);
+    centerFloorPlan(drawG, floorPlan, width, height, zoomRef.current!, drawGRef);
   }, [floorPlan, onEdgeClick, onRoomClick]);
 
   return (
@@ -737,7 +765,9 @@ function centerFloorPlan(
   g: d3.Selection<SVGGElement, unknown, null, undefined>,
   floorPlan: FloorPlan,
   width: number,
-  height: number
+  height: number,
+  zoom: d3.ZoomBehavior<SVGSVGElement, unknown>,
+  drawGRef: React.RefObject<SVGGElement | null>
 ) {
   // Get bounds from nodes, rooms, and fixtures
   let minX = Infinity, maxX = -Infinity;
@@ -787,7 +817,7 @@ function centerFloorPlan(
   const padding = 100;
   const scaleX = (width - padding * 2) / planWidth;
   const scaleY = (height - padding * 2) / planHeight;
-  const scale = Math.min(scaleX, scaleY, 1);
+  const scale = Math.min(scaleX, scaleY);
 
   const translateX = width / 2 - planCenterX * scale;
   const translateY = height / 2 - planCenterY * scale;
@@ -800,9 +830,13 @@ function centerFloorPlan(
   const gElement = g.node()?.parentElement;
   const svgElement = gElement?.parentElement as SVGSVGElement | null;
   if (svgElement) {
-    d3.select(svgElement)
+    // Set node radii immediately for the target scale
+    d3.select(drawGRef.current).selectAll('.node-point')
+      .attr('r', 3 / scale);
+
+    d3.select<SVGSVGElement, unknown>(svgElement)
       .transition()
       .duration(750)
-      .call(d3.zoom<SVGSVGElement, unknown>().transform as any, transform);
+      .call(zoom.transform as any, transform);
   }
 }
