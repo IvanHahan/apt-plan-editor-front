@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
+import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { sampleFloorPlan } from '../data';
 import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, type FloorPlanSummary } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
@@ -25,6 +26,8 @@ export const EditorLayout: React.FC = () => {
   // Redesign mode state
   const [isRedesignMode, setIsRedesignMode] = useState(false);
   const [redesignDesires, setRedesignDesires] = useState('');
+  const [isRedesigning, setIsRedesigning] = useState(false);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
 
   // Measurement / scale normalization state
   const [isMeasureMode, setIsMeasureMode] = useState(false);
@@ -190,13 +193,7 @@ export const EditorLayout: React.FC = () => {
     });
   };
 
-  const [isRedesigning, setIsRedesigning] = useState(false);
-
   const handleRedesignSubmit = async () => {
-    if (!redesignDesires.trim()) {
-      alert('Please describe your design desires before submitting.');
-      return;
-    }
     if (!currentPlanId) {
       alert('Please save the floor plan before redesigning.');
       return;
@@ -211,33 +208,24 @@ export const EditorLayout: React.FC = () => {
       const response = await redesignFloorPlan(currentPlanId, {
         desires: redesignDesires,
         locked_room_ids: lockedRooms.map(r => r.id),
-        num_alternatives: 3,
       });
 
-      if (response.alternatives.length > 0) {
-        // Load the first alternative as the current plan
-        const firstAlt = response.alternatives[0];
-        const converted = convertApiToFloorPlan(firstAlt.floor_plan);
-        setFloorPlan(converted);
-        setCurrentPlanId(firstAlt.floor_plan.id);
-
-        // Exit redesign mode
-        setIsRedesignMode(false);
-        setRedesignDesires('');
-
-        // Reload plans list to show new alternatives
-        await loadUserPlans();
-
-        alert(`Redesign complete! Generated ${response.total} alternative(s).`);
-      } else {
-        setError('No valid alternatives were generated. Try different desires.');
-      }
+      // Show the generated image in the preview modal
+      setGeneratedImage(response.image_base64);
     } catch (err) {
       console.error('Redesign failed:', err);
       setError(err instanceof Error ? err.message : 'Redesign failed');
     } finally {
       setIsRedesigning(false);
     }
+  };
+
+  const handleCloseGeneratedImage = () => {
+    setGeneratedImage(null);
+  };
+
+  const handleRegenerateImage = () => {
+    handleRedesignSubmit();
   };
 
   const handleToggleMeasureMode = () => {
@@ -586,20 +574,20 @@ export const EditorLayout: React.FC = () => {
 
                 <button
                   onClick={handleRedesignSubmit}
-                  disabled={!redesignDesires.trim() || isRedesigning}
+                  disabled={isRedesigning}
                   style={{
                     width: '100%',
                     padding: '12px',
                     fontSize: '16px',
                     fontWeight: 'bold',
-                    backgroundColor: (!redesignDesires.trim() || isRedesigning) ? '#ccc' : '#4CAF50',
+                    backgroundColor: isRedesigning ? '#ccc' : '#4CAF50',
                     color: 'white',
                     border: 'none',
                     borderRadius: '4px',
-                    cursor: (!redesignDesires.trim() || isRedesigning) ? 'not-allowed' : 'pointer'
+                    cursor: isRedesigning ? 'not-allowed' : 'pointer'
                   }}
                 >
-                  {isRedesigning ? 'Redesigning...' : 'Submit Redesign Request'}
+                  {isRedesigning ? 'Generating...' : 'Generate Redesign'}
                 </button>
               </div>
             </>
@@ -626,6 +614,16 @@ export const EditorLayout: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Generated Image Preview Modal */}
+      {generatedImage && (
+        <GeneratedImagePreview
+          imageBase64={generatedImage}
+          onClose={handleCloseGeneratedImage}
+          onRegenerate={handleRegenerateImage}
+          isGenerating={isRedesigning}
+        />
+      )}
     </div>
   );
 };

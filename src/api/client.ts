@@ -212,48 +212,18 @@ export async function createUser(
 /**
  * Redesign request types
  */
-export interface RoomConstraintsInput {
-  id: string;
-  min_area: number;
-  max_area: number;
-  min_aspect_ratio?: number;
-  max_aspect_ratio?: number;
-  tags?: string[];
-  needs_window?: boolean;
-  needs_entry_door?: boolean;
-}
-
-export interface RoomAdjacencyInput {
-  room_a_id: string;
-  room_b_id: string;
-  adjacency_type?: string;
-  strength?: string;
-}
-
 export interface RedesignRequest {
   desires?: string;
-  rooms?: RoomConstraintsInput[];
-  room_adjacencies?: RoomAdjacencyInput[];
-  design_concept?: string;
   locked_room_ids?: string[];
-  num_alternatives?: number;
-  cell_size?: number;
-  max_solve_time?: number;
-}
-
-export interface RedesignAlternative {
-  floor_plan: FloorPlanDetail;
-  solve_time: number | null;
-  message: string;
 }
 
 export interface RedesignResponse {
-  alternatives: RedesignAlternative[];
-  total: number;
+  image_base64: string;
+  message: string;
 }
 
 /**
- * Redesign a floor plan and generate multiple alternative layouts
+ * Redesign a floor plan using Gemini AI image generation
  */
 export async function redesignFloorPlan(
   planId: string,
@@ -267,22 +237,6 @@ export async function redesignFloorPlan(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Redesign failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
-  }
-
-  return response.json();
-}
-
-/**
- * Get all redesign alternatives for a floor plan
- */
-export async function getFloorPlanAlternatives(
-  planId: string
-): Promise<FloorPlanDetail[]> {
-  const response = await fetch(`${API_BASE_URL}/floor-plans/${planId}/alternatives`);
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Failed to get alternatives' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 

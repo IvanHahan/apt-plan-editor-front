@@ -60,6 +60,97 @@ function vecCross(a: Point, b: Point): number {
 }
 
 /**
+ * Calculate polygon area using Shoelace formula
+ */
+function calculatePolygonArea(coords: [number, number][]): number {
+  if (coords.length < 3) return 0;
+  
+  let area = 0;
+  for (let i = 0; i < coords.length; i++) {
+    const [x1, y1] = coords[i];
+    const [x2, y2] = coords[(i + 1) % coords.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  
+  return Math.abs(area) / 2;
+}
+
+/**
+ * Calculate centroid of a polygon
+ */
+function calculateCentroid(coords: [number, number][]): { x: number; y: number } {
+  if (coords.length === 0) return { x: 0, y: 0 };
+  
+  // Calculate geometric centroid using signed area formula
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  
+  for (let i = 0; i < coords.length; i++) {
+    const [x1, y1] = coords[i];
+    const [x2, y2] = coords[(i + 1) % coords.length];
+    const cross = x1 * y2 - x2 * y1;
+    area += cross;
+    cx += (x1 + x2) * cross;
+    cy += (y1 + y2) * cross;
+  }
+  
+  area /= 2;
+  
+  // Avoid division by zero for degenerate polygons
+  if (Math.abs(area) < 1e-10) {
+    // Fallback to arithmetic mean
+    let sumX = 0, sumY = 0;
+    coords.forEach(([x, y]) => {
+      sumX += x;
+      sumY += y;
+    });
+    return { x: sumX / coords.length, y: sumY / coords.length };
+  }
+  
+  cx /= (6 * area);
+  cy /= (6 * area);
+  
+  // Check if centroid is inside the polygon
+  if (isPointInPolygon({ x: cx, y: cy }, coords)) {
+    return { x: cx, y: cy };
+  }
+  
+  // If centroid is outside (non-convex polygon), find a point inside
+  // Use the center of the bounding box as fallback
+  const xs = coords.map(c => c[0]);
+  const ys = coords.map(c => c[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const bboxCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  
+  if (isPointInPolygon(bboxCenter, coords)) {
+    return bboxCenter;
+  }
+  
+  // Last resort: use first vertex
+  return { x: coords[0][0], y: coords[0][1] };
+}
+
+/**
+ * Check if a point is inside a polygon using ray casting algorithm
+ */
+function isPointInPolygon(point: { x: number; y: number }, coords: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+    const xi = coords[i][0], yi = coords[i][1];
+    const xj = coords[j][0], yj = coords[j][1];
+    
+    const intersect = ((yi > point.y) !== (yj > point.y))
+      && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
  * Line intersection: find where line (p1 + t*d1) meets line (p2 + s*d2)
  */
 function lineIntersect(p1: Point, d1: Point, p2: Point, d2: Point): Point | null {
@@ -506,26 +597,68 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           const polygon = d.polygon_coords;
           if (polygon.length === 0) return;
           
-          // Calculate centroid
-          let sumX = 0, sumY = 0;
-          polygon.forEach(([x, y]) => {
-            sumX += x;
-            sumY += y;
-          });
-          const centroidX = sumX / polygon.length;
-          const centroidY = sumY / polygon.length;
+          const centroid = calculateCentroid(polygon);
 
           // Add lock emoji as text
           d3.select(this)
             .append('text')
-            .attr('x', centroidX)
-            .attr('y', centroidY)
+            .attr('x', centroid.x)
+            .attr('y', centroid.y)
             .attr('text-anchor', 'middle')
             .attr('dominant-baseline', 'middle')
-            .attr('font-size', `${24 * dataUnit}px`)
+            .attr('font-size', `${8 * dataUnit}px`)
             .attr('pointer-events', 'none')
             .text('🔒');
         });
+
+      // Add area labels for all rooms
+      roomGroups.each(function(d: Room) {
+        const polygon = d.polygon_coords;
+        if (polygon.length === 0) return;
+        
+        // Calculate area
+        const area = calculatePolygonArea(polygon);
+        const centroid = calculateCentroid(polygon);
+        
+        // Convert area to square meters if unit_scale is available
+        // Default unit scale is 80 units/meter, so 1 unit² = (1/80)² m²
+        const unitScale = floorPlan.unit_scale || 80;
+        const areaInSquareMeters = area / (unitScale * unitScale);
+        
+        // Determine vertical offset based on whether lock icon is present
+        const hasLock = d.locked && onRoomClick;
+        const yOffset = hasLock ? 10 * dataUnit : 0;
+        
+        // Add area text
+        d3.select(this)
+          .append('text')
+          .attr('class', 'room-area-label')
+          .attr('x', centroid.x)
+          .attr('y', centroid.y + yOffset)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('font-size', `${6 * dataUnit}px`)
+          .attr('font-weight', '600')
+          .attr('fill', '#333')
+          .attr('pointer-events', 'none')
+          .text(`${areaInSquareMeters.toFixed(1)} m²`);
+        
+        // Add semi-transparent background for better readability
+        const textNode = d3.select(this).select('.room-area-label').node() as SVGGraphicsElement | null;
+        const bbox = textNode?.getBBox();
+        if (bbox) {
+          d3.select(this)
+            .insert('rect', '.room-area-label')
+            .attr('x', bbox.x - 2 * dataUnit)
+            .attr('y', bbox.y - dataUnit)
+            .attr('width', bbox.width + 4 * dataUnit)
+            .attr('height', bbox.height + 2 * dataUnit)
+            .attr('fill', 'white')
+            .attr('opacity', 0.8)
+            .attr('rx', 2 * dataUnit)
+            .attr('pointer-events', 'none');
+        }
+      });
     }
 
     // Render edges with geometries
