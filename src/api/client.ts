@@ -218,6 +218,8 @@ export interface NewNodeData {
   id: string;
   x: number;
   y: number;
+  /** If set, the backend will split this edge at this node's coordinates */
+  split_edge_id?: string;
 }
 
 /**

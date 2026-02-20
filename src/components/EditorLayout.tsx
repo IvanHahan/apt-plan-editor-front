@@ -56,7 +56,7 @@ export const EditorLayout: React.FC = () => {
   // Wall tool state
   const [wallThickness, setWallThickness] = useState(16); // 20 cm at unit_scale=80
 
-  const handleWallAdd = (newEdge: Edge, newNodes: Node[]) => {
+  const handleWallAdd = (newEdge: Edge, newNodes: Node[], splits?: { [nodeId: string]: string }) => {
     // Optimistic local update
     setFloorPlan((prev) => ({
       ...prev,
@@ -77,8 +77,18 @@ export const EditorLayout: React.FC = () => {
     }
 
     pendingWallsRef.current.push({
-      from_node: { id: fromNode.id, x: fromNode.x, y: fromNode.y },
-      to_node: { id: toNode.id, x: toNode.x, y: toNode.y },
+      from_node: {
+        id: fromNode.id,
+        x: fromNode.x,
+        y: fromNode.y,
+        split_edge_id: splits?.[fromNode.id],
+      },
+      to_node: {
+        id: toNode.id,
+        x: toNode.x,
+        y: toNode.y,
+        split_edge_id: splits?.[toNode.id],
+      },
       edge_type: newEdge.type,
       thickness: newEdge.thickness,
       is_inner: newEdge.is_inner ?? true,

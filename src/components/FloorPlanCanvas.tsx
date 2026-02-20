@@ -16,7 +16,8 @@ interface FloorPlanCanvasProps {
   onEdgeDelete?: (edgeId: string) => void;
   activeTool?: EditorTool;
   wallThickness?: number;
-  onWallAdd?: (edge: Edge, newNodes: Node[]) => void;
+  /** splits: map of nodeId → edgeId that should be split at that node's position */
+  onWallAdd?: (edge: Edge, newNodes: Node[], splits?: { [nodeId: string]: string }) => void;
 }
 
 // ============================================
@@ -357,8 +358,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const wallPreviewGRef = useRef<SVGGElement | null>(null);
 
   // Wall drawing state — kept in refs to avoid re-renders on every mouse move
-  const wallDrawRef = useRef<{ startPoint: Point; startNodeId?: string } | null>(null);
+  const wallDrawRef = useRef<{ startPoint: Point; startNodeId?: string; startSplitEdgeId?: string } | null>(null);
   const wallSnapNodeRef = useRef<string | null>(null);
+  const wallSnapEdgeRef = useRef<string | null>(null); // edge ID currently highlighted for snap
   // Always-current refs so wall handlers never get stale closures
   const wallThicknessRef = useRef(wallThickness);
   wallThicknessRef.current = wallThickness;
@@ -366,6 +368,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   onWallAddRef.current = onWallAdd;
   const wallFloorPlanNodesRef = useRef(floorPlan.nodes);
   wallFloorPlanNodesRef.current = floorPlan.nodes;
+  const wallFloorPlanEdgesRef = useRef(floorPlan.edges);
+  wallFloorPlanEdgesRef.current = floorPlan.edges;
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
 
@@ -590,6 +594,57 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       return best;
     };
 
+    /** Find nearest wall edge within 10 screen-pixels (node snap takes priority). */
+    const findSnapEdge = (clientX: number, clientY: number): { edge: Edge; point: Point } | null => {
+      const k = d3.zoomTransform(svg as SVGSVGElement).k;
+      const snapThreshold = 10 / k;
+      const nodeThreshold = 12 / k; // node snap exclusion zone
+      const dp = toDataPoint(clientX, clientY);
+      let best: { edge: Edge; point: Point } | null = null;
+      let bestDist = snapThreshold;
+      for (const edge of wallFloorPlanEdgesRef.current) {
+        const fromNode = wallFloorPlanNodesRef.current.find(n => n.id === edge.source);
+        const toNode = wallFloorPlanNodesRef.current.find(n => n.id === edge.target);
+        if (!fromNode || !toNode) continue;
+        // Project dp onto the segment
+        const dx = toNode.x - fromNode.x;
+        const dy = toNode.y - fromNode.y;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) continue;
+        const t = Math.max(0, Math.min(1, ((dp.x - fromNode.x) * dx + (dp.y - fromNode.y) * dy) / lenSq));
+        const projX = fromNode.x + t * dx;
+        const projY = fromNode.y + t * dy;
+        const dist = Math.hypot(dp.x - projX, dp.y - projY);
+        if (dist >= bestDist) continue;
+        // Skip if we're within the node-snap exclusion zone of an endpoint
+        const distToFrom = Math.hypot(dp.x - fromNode.x, dp.y - fromNode.y);
+        const distToTo = Math.hypot(dp.x - toNode.x, dp.y - toNode.y);
+        if (distToFrom < nodeThreshold || distToTo < nodeThreshold) continue;
+        bestDist = dist;
+        best = { edge, point: { x: projX, y: projY } };
+      }
+      return best;
+    };
+
+    /** Show/hide edge-snap indicator dot on the wall preview layer */
+    const updateEdgeSnapHighlight = (snap: { edge: Edge; point: Point } | null) => {
+      if (!wallPreviewGRef.current) return;
+      const pg = d3.select(wallPreviewGRef.current);
+      pg.selectAll('.edge-snap-dot').remove();
+      wallSnapEdgeRef.current = snap?.edge.id ?? null;
+      if (!snap) return;
+      const k = d3.zoomTransform(svg as SVGSVGElement).k;
+      pg.append('circle')
+        .attr('class', 'edge-snap-dot')
+        .attr('cx', snap.point.x)
+        .attr('cy', snap.point.y)
+        .attr('r', 6 / k)
+        .attr('fill', '#4CAF50')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 2 / k)
+        .attr('pointer-events', 'none');
+    };
+
     /** Highlight / un-highlight snap candidate node */
     const updateSnapHighlight = (snapNode: Node | null) => {
       if (!drawGRef.current) return;
@@ -621,16 +676,26 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       event.preventDefault();
 
       const snapNode = findSnapNode(event.clientX, event.clientY);
+      const snapEdge = snapNode ? null : findSnapEdge(event.clientX, event.clientY);
       const dp = toDataPoint(event.clientX, event.clientY);
-      const effectivePoint = snapNode ? { x: snapNode.x, y: snapNode.y } : dp;
+      const effectivePoint = snapNode
+        ? { x: snapNode.x, y: snapNode.y }
+        : snapEdge
+        ? snapEdge.point
+        : dp;
 
       if (!wallDrawRef.current) {
         // Phase 1 — record start point
-        wallDrawRef.current = { startPoint: effectivePoint, startNodeId: snapNode?.id };
+        wallDrawRef.current = {
+          startPoint: effectivePoint,
+          startNodeId: snapNode?.id,
+          startSplitEdgeId: snapEdge?.edge.id,
+        };
       } else {
         // Phase 2 — finish wall
-        const { startPoint, startNodeId } = wallDrawRef.current;
+        const { startPoint, startNodeId, startSplitEdgeId } = wallDrawRef.current;
         const newNodes: Node[] = [];
+        const splits: { [nodeId: string]: string } = {};
 
         let sourceId: string;
         if (startNodeId) {
@@ -638,6 +703,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         } else {
           sourceId = crypto.randomUUID();
           newNodes.push({ id: sourceId, x: startPoint.x, y: startPoint.y });
+          if (startSplitEdgeId) splits[sourceId] = startSplitEdgeId;
         }
 
         let targetId: string;
@@ -646,6 +712,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         } else {
           targetId = crypto.randomUUID();
           newNodes.push({ id: targetId, x: effectivePoint.x, y: effectivePoint.y });
+          if (snapEdge) splits[targetId] = snapEdge.edge.id;
         }
 
         // Guard: reject zero-length walls
@@ -663,24 +730,34 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           thickness: wallThicknessRef.current,
         };
 
-        onWallAddRef.current?.(newEdge, newNodes);
+        onWallAddRef.current?.(newEdge, newNodes, Object.keys(splits).length > 0 ? splits : undefined);
 
         // Reset drawing state
         wallDrawRef.current = null;
         if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
         updateSnapHighlight(null);
+        updateEdgeSnapHighlight(null);
       }
     };
 
     const handleWallMouseMove = (event: MouseEvent) => {
       const snapNode = findSnapNode(event.clientX, event.clientY);
       updateSnapHighlight(snapNode);
+      const snapEdge = snapNode ? null : findSnapEdge(event.clientX, event.clientY);
 
-      if (!wallDrawRef.current || !wallPreviewGRef.current) return;
+      if (!wallDrawRef.current || !wallPreviewGRef.current) {
+        // No drawing in progress — just show/hide the snap indicator
+        updateEdgeSnapHighlight(snapEdge);
+        return;
+      }
 
       const { startPoint } = wallDrawRef.current;
       const dp = toDataPoint(event.clientX, event.clientY);
-      const endPoint = snapNode ? { x: snapNode.x, y: snapNode.y } : dp;
+      const endPoint = snapNode
+        ? { x: snapNode.x, y: snapNode.y }
+        : snapEdge
+        ? snapEdge.point
+        : dp;
       const k = d3.zoomTransform(svg as SVGSVGElement).k;
       const thick = wallThicknessRef.current;
 
@@ -718,6 +795,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .attr('stroke', '#fff')
         .attr('stroke-width', 1.5 / k)
         .attr('pointer-events', 'none');
+
+      // Edge-snap dot drawn last so it renders on top of the preview line
+      updateEdgeSnapHighlight(snapEdge);
     };
 
     const handleWallKeyDown = (event: KeyboardEvent) => {
@@ -725,6 +805,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         wallDrawRef.current = null;
         if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
         updateSnapHighlight(null);
+        updateEdgeSnapHighlight(null);
       }
     };
 
