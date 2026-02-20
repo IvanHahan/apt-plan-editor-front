@@ -4,7 +4,7 @@ import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { ToolsBar } from './ToolsBar';
 import { WallToolOptions } from './WallToolOptions';
 import { sampleFloorPlan } from '../data';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, type FloorPlanSummary, type NodePositionUpdate } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
 import type { FloorPlan, Node, Edge, EditorTool } from '../types';
 import './EditorLayout.css';
@@ -30,6 +30,10 @@ export const EditorLayout: React.FC = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const autoSaveTimerRef = useRef<number | null>(null);
+
+  // Pending wall creations awaiting debounced persist
+  const wallSaveTimerRef = useRef<number | null>(null);
+  const pendingWallsRef = useRef<NewEdgeData[]>([]);
   
   // Redesign mode state
   const [isRedesignMode, setIsRedesignMode] = useState(false);
@@ -53,11 +57,59 @@ export const EditorLayout: React.FC = () => {
   const [wallThickness, setWallThickness] = useState(16); // 20 cm at unit_scale=80
 
   const handleWallAdd = (newEdge: Edge, newNodes: Node[]) => {
+    // Optimistic local update
     setFloorPlan((prev) => ({
       ...prev,
       nodes: [...prev.nodes, ...newNodes],
       edges: [...prev.edges, newEdge],
     }));
+
+    if (!currentPlanId) return;
+
+    // Resolve node coordinates immediately (avoid stale closure later).
+    // newNodes contains freshly created nodes; existing nodes come from floorPlan.nodes.
+    const allNodes = [...floorPlan.nodes, ...newNodes];
+    const fromNode = allNodes.find(n => n.id === newEdge.source);
+    const toNode = allNodes.find(n => n.id === newEdge.target);
+    if (!fromNode || !toNode) {
+      console.error('handleWallAdd: could not resolve node coordinates');
+      return;
+    }
+
+    pendingWallsRef.current.push({
+      from_node: { id: fromNode.id, x: fromNode.x, y: fromNode.y },
+      to_node: { id: toNode.id, x: toNode.x, y: toNode.y },
+      edge_type: newEdge.type,
+      thickness: newEdge.thickness,
+      is_inner: newEdge.is_inner ?? true,
+    });
+    setHasUnsavedChanges(true);
+
+    // Reset the debounce timer
+    if (wallSaveTimerRef.current !== null) {
+      window.clearTimeout(wallSaveTimerRef.current);
+    }
+
+    wallSaveTimerRef.current = window.setTimeout(async () => {
+      const batch = pendingWallsRef.current.splice(0);
+      if (batch.length === 0) return;
+
+      setIsSaving(true);
+      setError(null);
+
+      try {
+        const result = await createEdges(currentPlanId, batch);
+        const convertedPlan = convertApiToFloorPlan(result);
+        setFloorPlan(convertedPlan);
+        setHasUnsavedChanges(false);
+      } catch (err) {
+        console.error('Failed to save new walls:', err);
+        setError(err instanceof Error ? err.message : 'Failed to save walls');
+      } finally {
+        setIsSaving(false);
+        wallSaveTimerRef.current = null;
+      }
+    }, 2000);
   };
 
   // Load user's plans on mount
@@ -373,11 +425,14 @@ export const EditorLayout: React.FC = () => {
     }, 2000); // 2-second delay
   };
 
-  // Cleanup auto-save timer on unmount
+  // Cleanup auto-save timers on unmount
   React.useEffect(() => {
     return () => {
       if (autoSaveTimerRef.current !== null) {
         window.clearTimeout(autoSaveTimerRef.current);
+      }
+      if (wallSaveTimerRef.current !== null) {
+        window.clearTimeout(wallSaveTimerRef.current);
       }
     };
   }, []);

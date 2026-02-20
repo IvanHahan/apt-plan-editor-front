@@ -212,6 +212,48 @@ export async function updateFloorPlanNodes(
 }
 
 /**
+ * New node data as part of an edge creation request
+ */
+export interface NewNodeData {
+  id: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * New edge data for createEdges
+ */
+export interface NewEdgeData {
+  from_node: NewNodeData;
+  to_node: NewNodeData;
+  edge_type: string;
+  thickness?: number;
+  is_inner?: boolean;
+}
+
+/**
+ * Create one or more new edges (walls) in a floor plan.
+ * Nodes are resolved server-side: existing node IDs are reused (snap), new IDs cause node creation.
+ */
+export async function createEdges(
+  planId: string,
+  edges: NewEdgeData[]
+): Promise<FloorPlanDetail> {
+  const response = await fetch(`${API_BASE_URL}/floor-plans/${planId}/edges`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ edges }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to create edges' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
  * Delete multiple edges from a floor plan
  */
 export async function deleteEdges(
