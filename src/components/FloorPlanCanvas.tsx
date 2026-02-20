@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import type { FloorPlan, Node, Edge, Room, Fixture } from '../types';
+import type { FloorPlan, Node, Edge, Room, Fixture, EditorTool } from '../types';
 import './FloorPlanCanvas.css';
 
 interface FloorPlanCanvasProps {
@@ -14,6 +14,7 @@ interface FloorPlanCanvasProps {
   selectedEdgeIds?: Set<string>;
   onSelectedEdgesChange?: (edgeIds: string[]) => void;
   onEdgeDelete?: (edgeId: string) => void;
+  activeTool?: EditorTool;
 }
 
 // ============================================

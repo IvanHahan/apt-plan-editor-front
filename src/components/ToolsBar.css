@@ -1,0 +1,52 @@
+.tools-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
+  flex-grow: 0;
+  min-height: fit-content;
+  height: auto;
+}
+
+.tools-bar button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background-color: #fff;
+  border: 1px solid #d8d8d8;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  font-family: inherit;
+  height: auto;
+  flex-shrink: 0;
+}
+
+.tools-bar button:hover {
+  background-color: #e8e8e8;
+  border-color: #bbb;
+}
+
+.tools-bar button.active {
+  background-color: #2196F3;
+  color: #fff;
+  border-color: #2196F3;
+}
+
+.tools-bar button.active:hover {
+  background-color: #1976D2;
+  border-color: #1976D2;
+}
+
+.tool-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.tool-label {
+  font-weight: 500;
+}

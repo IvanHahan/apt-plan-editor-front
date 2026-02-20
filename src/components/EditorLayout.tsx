@@ -1,10 +1,11 @@
 import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { GeneratedImagePreview } from './GeneratedImagePreview';
+import { ToolsBar } from './ToolsBar';
 import { sampleFloorPlan } from '../data';
 import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, type FloorPlanSummary, type NodePositionUpdate } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
-import type { FloorPlan, Node } from '../types';
+import type { FloorPlan, Node, EditorTool } from '../types';
 import './EditorLayout.css';
 
 // Get user ID from env (in production, get from auth)
@@ -43,6 +44,9 @@ export const EditorLayout: React.FC = () => {
 
   // Edge selection state
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<Set<string>>(new Set());
+
+  // Active tool state
+  const [activeTool, setActiveTool] = useState<EditorTool>('cursor');
 
   // Load user's plans on mount
   React.useEffect(() => {
@@ -566,6 +570,12 @@ export const EditorLayout: React.FC = () => {
 
         {/* Middle Panel: Canvas */}
         <div className="panel panel-middle">
+          {/* Tools Bar */}
+          <ToolsBar 
+            activeTool={activeTool}
+            onToolChange={setActiveTool}
+          />
+          
           <div id="canvas-container" style={{ 
             position: 'relative',
             border: isRedesignMode ? '3px solid #4CAF50' : isMeasureMode ? '3px solid #e53935' : 'none',
@@ -706,6 +716,7 @@ export const EditorLayout: React.FC = () => {
 
             <FloorPlanCanvas
               floorPlan={floorPlan}
+              activeTool={activeTool}
               onEdgeClick={() => {}}
               onRoomClick={isRedesignMode ? handleToggleRoomLock : undefined}
               measureMode={isMeasureMode}

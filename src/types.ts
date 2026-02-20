@@ -64,3 +64,18 @@ export interface FloorPlan {
   fixtures?: Fixture[];
   unit_scale?: number;
 }
+
+/**
+ * Available editor tools
+ */
+export type EditorTool = 'cursor' | 'selection' | 'wall';
+
+/**
+ * Tool metadata for UI rendering
+ */
+export interface ToolDefinition {
+  id: EditorTool;
+  label: string;
+  icon: string;
+  description: string;
+}
