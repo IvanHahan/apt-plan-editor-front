@@ -12,32 +12,26 @@
 }
 
 .floor-plan-canvas-container .wall {
-  stroke: none;
   cursor: pointer;
 }
 
 .floor-plan-canvas-container .wall:hover {
-  stroke: none;
   filter: brightness(1.2);
 }
 
 .floor-plan-canvas-container .door {
-  stroke: none;
   cursor: pointer;
 }
 
 .floor-plan-canvas-container .door:hover {
-  stroke: none;
   filter: brightness(1.2);
 }
 
 .floor-plan-canvas-container .window {
-  stroke: none;
   cursor: pointer;
 }
 
 .floor-plan-canvas-container .window:hover {
-  stroke: none;
   filter: brightness(1.2);
 }
 

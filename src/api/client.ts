@@ -212,6 +212,48 @@ export async function updateFloorPlanNodes(
 }
 
 /**
+ * Delete multiple edges from a floor plan
+ */
+export async function deleteEdges(
+  planId: string,
+  edgeIds: string[]
+): Promise<FloorPlanDetail> {
+  const response = await fetch(`${API_BASE_URL}/floor-plans/${planId}/edges`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ edge_ids: edgeIds }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to delete edges' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Merge multiple adjacent edges into a single edge
+ */
+export async function mergeEdges(
+  planId: string,
+  edgeIds: string[]
+): Promise<FloorPlanDetail> {
+  const response = await fetch(`${API_BASE_URL}/floor-plans/${planId}/edges/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ edge_ids: edgeIds }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to merge edges' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
  * Create a new user
  */
 export async function createUser(

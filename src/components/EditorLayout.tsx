@@ -41,6 +41,9 @@ export const EditorLayout: React.FC = () => {
   const [metersInput, setMetersInput] = useState('');
   const [isNormalizingScale, setIsNormalizingScale] = useState(false);
 
+  // Edge selection state
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<Set<string>>(new Set());
+
   // Load user's plans on mount
   React.useEffect(() => {
     loadUserPlans();
@@ -363,6 +366,87 @@ export const EditorLayout: React.FC = () => {
     };
   }, []);
 
+  // Keyboard shortcuts for edge selection
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Delete key: delete selected edges
+      if (e.key === 'Delete' && selectedEdgeIds.size > 0 && isEditMode && !isRedesignMode && !isMeasureMode) {
+        e.preventDefault();
+        handleDeleteSelected();
+      }
+      // Escape key: clear selection
+      if (e.key === 'Escape' && selectedEdgeIds.size > 0 && isEditMode && !isRedesignMode && !isMeasureMode) {
+        e.preventDefault();
+        handleClearSelection();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedEdgeIds, isEditMode, isRedesignMode, isMeasureMode]);
+
+  // Edge selection handlers
+  const handleSelectedEdgesChange = (edgeIds: string[]) => {
+    setSelectedEdgeIds(new Set(edgeIds));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedEdgeIds(new Set());
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedEdgeIds.size === 0 || !currentPlanId) return;
+
+    try {
+      const { deleteEdges } = await import('../api/client');
+      const updatedPlan = await deleteEdges(currentPlanId, Array.from(selectedEdgeIds));
+      const convertedPlan = convertApiToFloorPlan(updatedPlan);
+      setFloorPlan(convertedPlan);
+      setSelectedEdgeIds(new Set());
+      setError(null);
+    } catch (err) {
+      console.error('Failed to delete edges:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete edges');
+    }
+  };
+
+  const handleMergeSelected = async () => {
+    if (selectedEdgeIds.size < 2 || !currentPlanId) return;
+
+    try {
+      const { mergeEdges } = await import('../api/client');
+      const updatedPlan = await mergeEdges(currentPlanId, Array.from(selectedEdgeIds));
+      const convertedPlan = convertApiToFloorPlan(updatedPlan);
+      setFloorPlan(convertedPlan);
+      setSelectedEdgeIds(new Set());
+      setError(null);
+    } catch (err) {
+      console.error('Failed to merge edges:', err);
+      setError(err instanceof Error ? err.message : 'Failed to merge edges');
+    }
+  };
+
+  const handleEdgeDelete = async (edgeId: string) => {
+    if (!currentPlanId) return;
+
+    try {
+      const { deleteEdges } = await import('../api/client');
+      const updatedPlan = await deleteEdges(currentPlanId, [edgeId]);
+      const convertedPlan = convertApiToFloorPlan(updatedPlan);
+      setFloorPlan(convertedPlan);
+      // Remove from selection if it was selected
+      if (selectedEdgeIds.has(edgeId)) {
+        const newSelection = new Set(selectedEdgeIds);
+        newSelection.delete(edgeId);
+        setSelectedEdgeIds(newSelection);
+      }
+      setError(null);
+    } catch (err) {
+      console.error('Failed to delete edge:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete edge');
+    }
+  };
+
   const canSetScale = !!currentPlanId;
 
   return (
@@ -547,6 +631,79 @@ export const EditorLayout: React.FC = () => {
                 )}
               </div>
             )}
+
+            {/* Edge Selection Controls */}
+            {selectedEdgeIds.size > 0 && isEditMode && !isRedesignMode && !isMeasureMode && (
+              <div style={{
+                position: 'absolute',
+                top: '20px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                backgroundColor: '#fff',
+                border: '2px solid #2196F3',
+                borderRadius: '8px',
+                padding: '12px 20px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                zIndex: 1000
+              }}>
+                <span style={{ fontWeight: 'bold', color: '#2196F3' }}>
+                  {selectedEdgeIds.size} edge{selectedEdgeIds.size > 1 ? 's' : ''} selected
+                </span>
+                <button
+                  onClick={handleDeleteSelected}
+                  style={{
+                    backgroundColor: '#f44336',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px'
+                  }}
+                  title="Delete selected edges (Delete key)"
+                >
+                  🗑️ Delete
+                </button>
+                <button
+                  onClick={handleMergeSelected}
+                  disabled={selectedEdgeIds.size < 2}
+                  style={{
+                    backgroundColor: selectedEdgeIds.size < 2 ? '#ccc' : '#2196F3',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '6px 16px',
+                    cursor: selectedEdgeIds.size < 2 ? 'not-allowed' : 'pointer',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    opacity: selectedEdgeIds.size < 2 ? 0.6 : 1
+                  }}
+                  title={selectedEdgeIds.size < 2 ? 'Select at least 2 edges to merge' : 'Merge selected edges into one'}
+                >
+                  🔗 Merge
+                </button>
+                <button
+                  onClick={handleClearSelection}
+                  style={{
+                    backgroundColor: '#fff',
+                    color: '#666',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                  title="Clear selection (Esc)"
+                >
+                  ✕ Clear
+                </button>
+              </div>
+            )}
+
             <FloorPlanCanvas
               floorPlan={floorPlan}
               onEdgeClick={() => {}}
@@ -555,6 +712,9 @@ export const EditorLayout: React.FC = () => {
               onMeasure={handleMeasure}
               isEditMode={isEditMode && !isRedesignMode && !isMeasureMode}
               onNodePositionsChange={handleNodePositionsChange}
+              selectedEdgeIds={selectedEdgeIds}
+              onSelectedEdgesChange={handleSelectedEdgesChange}
+              onEdgeDelete={handleEdgeDelete}
             />
           </div>
         </div>

@@ -11,6 +11,9 @@ interface FloorPlanCanvasProps {
   onMeasure?: (pixelDistance: number) => void;
   isEditMode?: boolean;
   onNodePositionsChange?: (nodes: Node[]) => void;
+  selectedEdgeIds?: Set<string>;
+  onSelectedEdgesChange?: (edgeIds: string[]) => void;
+  onEdgeDelete?: (edgeId: string) => void;
 }
 
 // ============================================
@@ -336,6 +339,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   onMeasure,
   isEditMode,
   onNodePositionsChange,
+  selectedEdgeIds = new Set(),
+  onSelectedEdgesChange,
+  onEdgeDelete,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
@@ -347,6 +353,42 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const [measurePoint2, setMeasurePoint2] = useState<Point | null>(null);
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const [draggedEdge, setDraggedEdge] = useState<Edge | null>(null);
+  const [isShiftPressed, setIsShiftPressed] = useState<boolean>(false);
+  const [selectionBox, setSelectionBox] = useState<{x1: number; y1: number; x2: number; y2: number} | null>(null);
+  const [contextMenu, setContextMenu] = useState<{x: number; y: number; edgeId: string} | null>(null);
+
+  // Close context menu on any click (with delay to avoid immediate closing)
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    if (contextMenu) {
+      // Delay adding the listener to avoid catching the same click that opened the menu
+      const timeoutId = setTimeout(() => {
+        window.addEventListener('click', handleClick);
+      }, 100);
+      return () => {
+        clearTimeout(timeoutId);
+        window.removeEventListener('click', handleClick);
+      };
+    }
+  }, [contextMenu]);
+
+  // Track Shift key state for multiselect
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') setIsShiftPressed(true);
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') setIsShiftPressed(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   // Reset measurement when mode changes
   useEffect(() => {
@@ -685,9 +727,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .join(' ');
 
       const wallElement = drawG.append('polygon')
-        .attr('class', 'wall')
+        .attr('class', selectedEdgeIds.has(edge.id) ? 'wall selected' : 'wall')
         .attr('points', pointsStr)
-        .attr('fill', draggedEdge?.id === edge.id ? '#0066cc' : '#333')
+        .attr('fill', draggedEdge?.id === edge.id ? '#0066cc' : (selectedEdgeIds.has(edge.id) ? '#2196F3' : '#333'))
         .attr('cursor', (isEditMode && !measureMode) ? 'move' : 'default')
         .on('mouseenter', function() {
           d3.select(this)
@@ -698,15 +740,38 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         })
         .on('mouseleave', function() {
           const isDragged = draggedEdge?.id === edge.id;
+          const isSelected = selectedEdgeIds.has(edge.id);
           d3.select(this)
             .transition()
             .duration(150)
-            .attr('fill', isDragged ? '#0066cc' : '#333')
+            .attr('fill', isDragged ? '#0066cc' : (isSelected ? '#2196F3' : '#333'))
             .attr('opacity', 1);
         })
         .on('click', function(event) {
           event.stopPropagation();
-          onEdgeClick?.(edge.id);
+          if (isShiftPressed && onSelectedEdgesChange) {
+            // Toggle selection
+            const newSelection = new Set(selectedEdgeIds);
+            if (newSelection.has(edge.id)) {
+              newSelection.delete(edge.id);
+            } else {
+              newSelection.add(edge.id);
+            }
+            onSelectedEdgesChange(Array.from(newSelection));
+          } else {
+            onEdgeClick?.(edge.id);
+          }
+        })
+        .on('contextmenu', function(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (onEdgeDelete) {
+            setContextMenu({
+              x: event.pageX,
+              y: event.pageY,
+              edgeId: edge.id
+            });
+          }
         });
 
       // Add drag behavior to walls in edit mode
@@ -720,6 +785,10 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           let startTargetX = 0, startTargetY = 0;
 
           const wallDrag = d3.drag<SVGPolygonElement, WallPolygon>()
+            .filter(function() {
+              // Disable drag when Shift is pressed (for selection mode)
+              return !isShiftPressed;
+            })
             .on('start', function(_event) {
               setDraggedEdge(edge);
               d3.select(this).attr('fill', '#0066cc');
@@ -805,15 +874,34 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         );
 
         drawG.append('polygon')
-          .attr('class', 'door')
+          .attr('class', selectedEdgeIds.has(edge.id) ? 'door selected' : 'door')
           .attr('points', doorPolygon.map(p => `${p.x},${p.y}`).join(' '))
-          .attr('fill', '#D2691E')
-          .attr('stroke', '#8B4513')
-          .attr('stroke-width', 0.5 * dataUnit)
+          .attr('fill', selectedEdgeIds.has(edge.id) ? '#2196F3' : '#D2691E')
           .attr('cursor', 'pointer')
           .on('click', function(event) {
             event.stopPropagation();
-            onEdgeClick?.(edge.id);
+            if (isShiftPressed && onSelectedEdgesChange) {
+              const newSelection = new Set(selectedEdgeIds);
+              if (newSelection.has(edge.id)) {
+                newSelection.delete(edge.id);
+              } else {
+                newSelection.add(edge.id);
+              }
+              onSelectedEdgesChange(Array.from(newSelection));
+            } else {
+              onEdgeClick?.(edge.id);
+            }
+          })
+          .on('contextmenu', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (onEdgeDelete) {
+              setContextMenu({
+                x: event.pageX,
+                y: event.pageY,
+                edgeId: edge.id
+              });
+            }
           });
 
         // Add door swing arc
@@ -838,15 +926,34 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         // Render using polygon geometries from backend
         edge.geometries.forEach((geom) => {
           drawG.append('polygon')
-            .attr('class', 'window')
+            .attr('class', selectedEdgeIds.has(edge.id) ? 'window selected' : 'window')
             .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
-            .attr('fill', '#87CEEB')
-            .attr('stroke', '#4682B4')
-            .attr('stroke-width', 0.5 * dataUnit)
+            .attr('fill', selectedEdgeIds.has(edge.id) ? '#2196F3' : '#87CEEB')
             .attr('cursor', 'pointer')
             .on('click', function(event) {
               event.stopPropagation();
-              onEdgeClick?.(edge.id);
+              if (isShiftPressed && onSelectedEdgesChange) {
+                const newSelection = new Set(selectedEdgeIds);
+                if (newSelection.has(edge.id)) {
+                  newSelection.delete(edge.id);
+                } else {
+                  newSelection.add(edge.id);
+                }
+                onSelectedEdgesChange(Array.from(newSelection));
+              } else {
+                onEdgeClick?.(edge.id);
+              }
+            })
+            .on('contextmenu', function(event) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (onEdgeDelete) {
+                setContextMenu({
+                  x: event.pageX,
+                  y: event.pageY,
+                  edgeId: edge.id
+                });
+              }
             });
         });
       } else {
@@ -865,15 +972,34 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
         // Window frame
         drawG.append('polygon')
-          .attr('class', 'window')
+          .attr('class', selectedEdgeIds.has(edge.id) ? 'window selected' : 'window')
           .attr('points', windowPolygon.map(p => `${p.x},${p.y}`).join(' '))
-          .attr('fill', '#B0E0E6')
-          .attr('stroke', '#4682B4')
-          .attr('stroke-width', 0.5 * dataUnit)
+          .attr('fill', selectedEdgeIds.has(edge.id) ? '#2196F3' : '#B0E0E6')
           .attr('cursor', 'pointer')
           .on('click', function(event) {
             event.stopPropagation();
-            onEdgeClick?.(edge.id);
+            if (isShiftPressed && onSelectedEdgesChange) {
+              const newSelection = new Set(selectedEdgeIds);
+              if (newSelection.has(edge.id)) {
+                newSelection.delete(edge.id);
+              } else {
+                newSelection.add(edge.id);
+              }
+              onSelectedEdgesChange(Array.from(newSelection));
+            } else {
+              onEdgeClick?.(edge.id);
+            }
+          })
+          .on('contextmenu', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (onEdgeDelete) {
+              setContextMenu({
+                x: event.pageX,
+                y: event.pageY,
+                edgeId: edge.id
+              });
+            }
           });
 
         // Add center line for window glass effect
@@ -981,22 +1107,152 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       nodeGroups.call(drag as any);
     }
     
+    // Drag-to-select rectangle functionality
+    if (isEditMode && !measureMode && onSelectedEdgesChange) {
+      let selectionStart: { x: number; y: number } | null = null;
+      
+      const selectionDrag = d3.drag<SVGSVGElement, unknown>()
+        .filter(function(event) {
+          // Only start drag-to-select when Shift is pressed and clicking on background
+          return isShiftPressed && event.target === svgRef.current;
+        })
+        .on('start', function(event) {
+          const ctm = gRef.current?.getScreenCTM();
+          if (!ctm) return;
+          
+          const point = svgRef.current!.createSVGPoint();
+          point.x = event.sourceEvent.clientX;
+          point.y = event.sourceEvent.clientY;
+          const transformed = point.matrixTransform(ctm.inverse());
+          
+          selectionStart = { x: transformed.x, y: transformed.y };
+          setSelectionBox({ x1: transformed.x, y1: transformed.y, x2: transformed.x, y2: transformed.y });
+        })
+        .on('drag', function(event) {
+          if (!selectionStart) return;
+          
+          const ctm = gRef.current?.getScreenCTM();
+          if (!ctm) return;
+          
+          const point = svgRef.current!.createSVGPoint();
+          point.x = event.sourceEvent.clientX;
+          point.y = event.sourceEvent.clientY;
+          const transformed = point.matrixTransform(ctm.inverse());
+          
+          setSelectionBox({
+            x1: selectionStart.x,
+            y1: selectionStart.y,
+            x2: transformed.x,
+            y2: transformed.y
+          });
+        })
+        .on('end', function() {
+          if (!selectionStart || !selectionBox) {
+            setSelectionBox(null);
+            return;
+          }
+          
+          // Calculate selection rectangle bounds
+          const minX = Math.min(selectionBox.x1, selectionBox.x2);
+          const maxX = Math.max(selectionBox.x1, selectionBox.x2);
+          const minY = Math.min(selectionBox.y1, selectionBox.y2);
+          const maxY = Math.max(selectionBox.y1, selectionBox.y2);
+          
+          // Check which edges fall within the selection box
+          const selectedIds = new Set(selectedEdgeIds);
+          floorPlan.edges.forEach((edge: Edge) => {
+            const sourceNode = nodeMap.get(edge.source);
+            const targetNode = nodeMap.get(edge.target);
+            
+            if (!sourceNode || !targetNode) return;
+            
+            // Check if edge midpoint is inside selection box
+            const midX = (sourceNode.x + targetNode.x) / 2;
+            const midY = (sourceNode.y + targetNode.y) / 2;
+            
+            if (midX >= minX && midX <= maxX && midY >= minY && midY <= maxY) {
+              selectedIds.add(edge.id);
+            }
+          });
+          
+          onSelectedEdgesChange(Array.from(selectedIds));
+          setSelectionBox(null);
+          selectionStart = null;
+        });
+      
+      svg.call(selectionDrag as any);
+    }
 
     // Center and fit the floor plan
     centerFloorPlan(drawG, floorPlan, width, height, zoomRef.current!, drawGRef);
-  }, [floorPlan, onEdgeClick, onRoomClick]);
+  }, [floorPlan, onEdgeClick, onRoomClick, selectedEdgeIds, isShiftPressed, onSelectedEdgesChange, onEdgeDelete]);
 
   return (
     <div className="floor-plan-canvas-container">
       <svg
         ref={svgRef}
-        style={{ cursor: measureMode ? 'crosshair' : undefined }}
+        style={{ cursor: measureMode ? 'crosshair' : (isShiftPressed && isEditMode ? 'crosshair' : undefined) }}
       >
         <g ref={gRef}>
           <g ref={drawGRef} />
           <g ref={measureGRef} />
+          {selectionBox && (
+            <rect
+              x={Math.min(selectionBox.x1, selectionBox.x2)}
+              y={Math.min(selectionBox.y1, selectionBox.y2)}
+              width={Math.abs(selectionBox.x2 - selectionBox.x1)}
+              height={Math.abs(selectionBox.y2 - selectionBox.y1)}
+              fill="rgba(33, 150, 243, 0.1)"
+              stroke="#2196F3"
+              strokeWidth="2"
+              strokeDasharray="5,5"
+              pointerEvents="none"
+            />
+          )}
         </g>
       </svg>
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`,
+            backgroundColor: '#fff',
+            border: '1px solid #ccc',
+            borderRadius: '4px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            zIndex: 10000,
+            minWidth: '120px'
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdgeDelete?.(contextMenu.edgeId);
+              setContextMenu(null);
+            }}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '8px 16px',
+              border: 'none',
+              backgroundColor: 'transparent',
+              textAlign: 'left',
+              cursor: 'pointer',
+              fontSize: '14px',
+              color: '#d32f2f'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#f5f5f5';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            🗑️ Delete Edge
+          </button>
+        </div>
+      )}
     </div>
   );
 };
