@@ -1,0 +1,49 @@
+.wall-tool-options {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background-color: #e3f2fd;
+  border-bottom: 1px solid #bbdefb;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  min-height: fit-content;
+}
+
+.wall-tool-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1565c0;
+  white-space: nowrap;
+}
+
+.wall-preset-select {
+  font-size: 13px;
+  border: 1px solid #90caf9;
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: #fff;
+  color: #1a237e;
+  cursor: pointer;
+  outline: none;
+}
+
+.wall-preset-select:focus {
+  border-color: #2196F3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+}
+
+.wall-thickness-slider {
+  width: 120px;
+  accent-color: #2196F3;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wall-thickness-readout {
+  font-size: 13px;
+  color: #1565c0;
+  font-weight: 500;
+  min-width: 46px;
+  white-space: nowrap;
+}

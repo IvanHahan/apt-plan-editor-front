@@ -71,6 +71,15 @@ export interface FloorPlan {
 export type EditorTool = 'cursor' | 'selection' | 'wall';
 
 /**
+ * Props for WallToolOptions panel
+ */
+export interface WallToolOptionsProps {
+  thickness: number;          // in data-space units
+  onThicknessChange: (v: number) => void;
+  unitScale: number;          // data-units per metre
+}
+
+/**
  * Tool metadata for UI rendering
  */
 export interface ToolDefinition {

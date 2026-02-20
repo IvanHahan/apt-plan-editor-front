@@ -2,10 +2,11 @@ import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { ToolsBar } from './ToolsBar';
+import { WallToolOptions } from './WallToolOptions';
 import { sampleFloorPlan } from '../data';
 import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, type FloorPlanSummary, type NodePositionUpdate } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
-import type { FloorPlan, Node, EditorTool } from '../types';
+import type { FloorPlan, Node, Edge, EditorTool } from '../types';
 import './EditorLayout.css';
 
 // Get user ID from env (in production, get from auth)
@@ -47,6 +48,17 @@ export const EditorLayout: React.FC = () => {
 
   // Active tool state
   const [activeTool, setActiveTool] = useState<EditorTool>('cursor');
+
+  // Wall tool state
+  const [wallThickness, setWallThickness] = useState(16); // 20 cm at unit_scale=80
+
+  const handleWallAdd = (newEdge: Edge, newNodes: Node[]) => {
+    setFloorPlan((prev) => ({
+      ...prev,
+      nodes: [...prev.nodes, ...newNodes],
+      edges: [...prev.edges, newEdge],
+    }));
+  };
 
   // Load user's plans on mount
   React.useEffect(() => {
@@ -575,6 +587,13 @@ export const EditorLayout: React.FC = () => {
             activeTool={activeTool}
             onToolChange={setActiveTool}
           />
+          {activeTool === 'wall' && (
+            <WallToolOptions
+              thickness={wallThickness}
+              onThicknessChange={setWallThickness}
+              unitScale={floorPlan.unit_scale ?? 80}
+            />
+          )}
           
           <div id="canvas-container" style={{ 
             position: 'relative',
@@ -717,6 +736,8 @@ export const EditorLayout: React.FC = () => {
             <FloorPlanCanvas
               floorPlan={floorPlan}
               activeTool={activeTool}
+              wallThickness={wallThickness}
+              onWallAdd={handleWallAdd}
               onEdgeClick={() => {}}
               onRoomClick={isRedesignMode ? handleToggleRoomLock : undefined}
               measureMode={isMeasureMode}

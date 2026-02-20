@@ -15,6 +15,8 @@ interface FloorPlanCanvasProps {
   onSelectedEdgesChange?: (edgeIds: string[]) => void;
   onEdgeDelete?: (edgeId: string) => void;
   activeTool?: EditorTool;
+  wallThickness?: number;
+  onWallAdd?: (edge: Edge, newNodes: Node[]) => void;
 }
 
 // ============================================
@@ -343,12 +345,29 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   selectedEdgeIds = new Set(),
   onSelectedEdgesChange,
   onEdgeDelete,
+  activeTool,
+  wallThickness = 16,
+  onWallAdd,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
   const drawGRef = useRef<SVGGElement>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const measureGRef = useRef<SVGGElement>(null);
+  const wallPreviewGRef = useRef<SVGGElement | null>(null);
+
+  // Wall drawing state — kept in refs to avoid re-renders on every mouse move
+  const wallDrawRef = useRef<{ startPoint: Point; startNodeId?: string } | null>(null);
+  const wallSnapNodeRef = useRef<string | null>(null);
+  // Always-current refs so wall handlers never get stale closures
+  const wallThicknessRef = useRef(wallThickness);
+  wallThicknessRef.current = wallThickness;
+  const onWallAddRef = useRef(onWallAdd);
+  onWallAddRef.current = onWallAdd;
+  const wallFloorPlanNodesRef = useRef(floorPlan.nodes);
+  wallFloorPlanNodesRef.current = floorPlan.nodes;
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
 
   const [measurePoint1, setMeasurePoint1] = useState<Point | null>(null);
   const [measurePoint2, setMeasurePoint2] = useState<Point | null>(null);
@@ -514,6 +533,211 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     svg.addEventListener('click', handleMeasureClick, true);
     return () => svg.removeEventListener('click', handleMeasureClick, true);
   }, [measureMode]);
+
+  // ============================================
+  // Wall Drawing Tool interaction
+  // ============================================
+  useEffect(() => {
+    // When switching away from wall tool, abort any in-progress drawing
+    if (activeTool !== 'wall') {
+      wallDrawRef.current = null;
+      if (wallPreviewGRef.current) {
+        d3.select(wallPreviewGRef.current).selectAll('*').remove();
+      }
+      // Clear any lingering snap highlight
+      if (wallSnapNodeRef.current && drawGRef.current) {
+        d3.select(drawGRef.current)
+          .selectAll('.node-group')
+          .filter((d: any) => d.id === wallSnapNodeRef.current)
+          .select('.node-point')
+          .attr('fill', '#FF6B6B')
+          .attr('stroke', null)
+          .attr('stroke-width', null);
+        wallSnapNodeRef.current = null;
+      }
+      return;
+    }
+
+    const svg = svgRef.current;
+    const gElement = gRef.current;
+    if (!svg || !gElement) return;
+
+    /** Convert screen coords → data-space coords */
+    const toDataPoint = (clientX: number, clientY: number): Point => {
+      const p = (svg as SVGSVGElement).createSVGPoint();
+      p.x = clientX;
+      p.y = clientY;
+      const ctm = gElement.getScreenCTM();
+      if (!ctm) return { x: 0, y: 0 };
+      const tp = p.matrixTransform(ctm.inverse());
+      return { x: tp.x, y: tp.y };
+    };
+
+    /** Find nearest node within 12 screen-pixels */
+    const findSnapNode = (clientX: number, clientY: number): Node | null => {
+      const k = d3.zoomTransform(svg as SVGSVGElement).k;
+      const threshold = 12 / k; // convert screen px → data units
+      const dp = toDataPoint(clientX, clientY);
+      let best: Node | null = null;
+      let bestDist = threshold;
+      wallFloorPlanNodesRef.current.forEach((node) => {
+        const dist = Math.hypot(node.x - dp.x, node.y - dp.y);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = node;
+        }
+      });
+      return best;
+    };
+
+    /** Highlight / un-highlight snap candidate node */
+    const updateSnapHighlight = (snapNode: Node | null) => {
+      if (!drawGRef.current) return;
+      const dg = d3.select(drawGRef.current);
+      // Clear old highlight
+      if (wallSnapNodeRef.current) {
+        dg.selectAll('.node-group')
+          .filter((d: any) => d.id === wallSnapNodeRef.current)
+          .select('.node-point')
+          .attr('fill', '#FF6B6B')
+          .attr('stroke', null)
+          .attr('stroke-width', null);
+      }
+      // Apply new highlight
+      if (snapNode) {
+        const k = d3.zoomTransform(svg as SVGSVGElement).k;
+        dg.selectAll('.node-group')
+          .filter((d: any) => d.id === snapNode.id)
+          .select('.node-point')
+          .attr('fill', '#4CAF50')
+          .attr('stroke', '#fff')
+          .attr('stroke-width', 2 / k);
+      }
+      wallSnapNodeRef.current = snapNode?.id ?? null;
+    };
+
+    const handleWallClick = (event: MouseEvent) => {
+      event.stopPropagation();
+      event.preventDefault();
+
+      const snapNode = findSnapNode(event.clientX, event.clientY);
+      const dp = toDataPoint(event.clientX, event.clientY);
+      const effectivePoint = snapNode ? { x: snapNode.x, y: snapNode.y } : dp;
+
+      if (!wallDrawRef.current) {
+        // Phase 1 — record start point
+        wallDrawRef.current = { startPoint: effectivePoint, startNodeId: snapNode?.id };
+      } else {
+        // Phase 2 — finish wall
+        const { startPoint, startNodeId } = wallDrawRef.current;
+        const newNodes: Node[] = [];
+
+        let sourceId: string;
+        if (startNodeId) {
+          sourceId = startNodeId;
+        } else {
+          sourceId = crypto.randomUUID();
+          newNodes.push({ id: sourceId, x: startPoint.x, y: startPoint.y });
+        }
+
+        let targetId: string;
+        if (snapNode) {
+          targetId = snapNode.id;
+        } else {
+          targetId = crypto.randomUUID();
+          newNodes.push({ id: targetId, x: effectivePoint.x, y: effectivePoint.y });
+        }
+
+        // Guard: reject zero-length walls
+        if (sourceId === targetId) {
+          wallDrawRef.current = null;
+          if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
+          return;
+        }
+
+        const newEdge: Edge = {
+          id: crypto.randomUUID(),
+          source: sourceId,
+          target: targetId,
+          type: 'wall',
+          thickness: wallThicknessRef.current,
+        };
+
+        onWallAddRef.current?.(newEdge, newNodes);
+
+        // Reset drawing state
+        wallDrawRef.current = null;
+        if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
+        updateSnapHighlight(null);
+      }
+    };
+
+    const handleWallMouseMove = (event: MouseEvent) => {
+      const snapNode = findSnapNode(event.clientX, event.clientY);
+      updateSnapHighlight(snapNode);
+
+      if (!wallDrawRef.current || !wallPreviewGRef.current) return;
+
+      const { startPoint } = wallDrawRef.current;
+      const dp = toDataPoint(event.clientX, event.clientY);
+      const endPoint = snapNode ? { x: snapNode.x, y: snapNode.y } : dp;
+      const k = d3.zoomTransform(svg as SVGSVGElement).k;
+      const thick = wallThicknessRef.current;
+
+      const pg = d3.select(wallPreviewGRef.current);
+      pg.selectAll('*').remove();
+
+      // Transparent wall body (shows thickness)
+      pg.append('line')
+        .attr('x1', startPoint.x)
+        .attr('y1', startPoint.y)
+        .attr('x2', endPoint.x)
+        .attr('y2', endPoint.y)
+        .attr('stroke', '#2196F3')
+        .attr('stroke-width', thick)
+        .attr('stroke-opacity', 0.25)
+        .attr('pointer-events', 'none');
+
+      // Dashed centre-line
+      pg.append('line')
+        .attr('x1', startPoint.x)
+        .attr('y1', startPoint.y)
+        .attr('x2', endPoint.x)
+        .attr('y2', endPoint.y)
+        .attr('stroke', '#2196F3')
+        .attr('stroke-width', 2 / k)
+        .attr('stroke-dasharray', `${8 / k},${4 / k}`)
+        .attr('pointer-events', 'none');
+
+      // Start-point marker
+      pg.append('circle')
+        .attr('cx', startPoint.x)
+        .attr('cy', startPoint.y)
+        .attr('r', 5 / k)
+        .attr('fill', '#2196F3')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 1.5 / k)
+        .attr('pointer-events', 'none');
+    };
+
+    const handleWallKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && wallDrawRef.current) {
+        wallDrawRef.current = null;
+        if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
+        updateSnapHighlight(null);
+      }
+    };
+
+    svg.addEventListener('click', handleWallClick, true);
+    svg.addEventListener('mousemove', handleWallMouseMove);
+    window.addEventListener('keydown', handleWallKeyDown);
+
+    return () => {
+      svg.removeEventListener('click', handleWallClick, true);
+      svg.removeEventListener('mousemove', handleWallMouseMove);
+      window.removeEventListener('keydown', handleWallKeyDown);
+    };
+  }, [activeTool]);
 
   useEffect(() => {
     if (!svgRef.current || !gRef.current || !drawGRef.current) return;
@@ -787,8 +1011,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
           const wallDrag = d3.drag<SVGPolygonElement, WallPolygon>()
             .filter(function() {
-              // Disable drag when Shift is pressed (for selection mode)
-              return !isShiftPressed;
+              // Disable drag when Shift is pressed (for selection mode) or wall tool active
+              return !isShiftPressed && activeToolRef.current !== 'wall';
             })
             .on('start', function(_event) {
               setDraggedEdge(edge);
@@ -1082,6 +1306,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     // Add drag behavior to nodes in edit mode
     if (isEditMode && !measureMode && onNodePositionsChange) {
       const drag = d3.drag<SVGGElement, Node>()
+        .filter(function() {
+          return activeToolRef.current !== 'wall';
+        })
         .on('start', function(_event, d) {
           setDraggedNodeId(d.id);
           d3.select(this).select('.node-point')
@@ -1192,10 +1419,11 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     <div className="floor-plan-canvas-container">
       <svg
         ref={svgRef}
-        style={{ cursor: measureMode ? 'crosshair' : (isShiftPressed && isEditMode ? 'crosshair' : undefined) }}
+        style={{ cursor: measureMode || activeTool === 'wall' ? 'crosshair' : (isShiftPressed && isEditMode ? 'crosshair' : undefined) }}
       >
         <g ref={gRef}>
           <g ref={drawGRef} />
+          <g ref={wallPreviewGRef} />
           <g ref={measureGRef} />
           {selectionBox && (
             <rect
