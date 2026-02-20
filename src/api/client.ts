@@ -182,6 +182,36 @@ export async function deleteFloorPlan(planId: string): Promise<void> {
 }
 
 /**
+ * Node position update type
+ */
+export interface NodePositionUpdate {
+  id: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Update node positions in a floor plan
+ */
+export async function updateFloorPlanNodes(
+  planId: string,
+  nodes: NodePositionUpdate[]
+): Promise<FloorPlanDetail> {
+  const response = await fetch(`${API_BASE_URL}/floor-plans/${planId}/nodes`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nodes }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to update nodes' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
  * Create a new user
  */
 export async function createUser(

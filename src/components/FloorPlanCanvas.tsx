@@ -9,6 +9,8 @@ interface FloorPlanCanvasProps {
   onRoomClick?: (roomId: string) => void;
   measureMode?: boolean;
   onMeasure?: (pixelDistance: number) => void;
+  isEditMode?: boolean;
+  onNodePositionsChange?: (nodes: Node[]) => void;
 }
 
 // ============================================
@@ -332,6 +334,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   onRoomClick,
   measureMode,
   onMeasure,
+  isEditMode,
+  onNodePositionsChange,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
@@ -341,6 +345,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
   const [measurePoint1, setMeasurePoint1] = useState<Point | null>(null);
   const [measurePoint2, setMeasurePoint2] = useState<Point | null>(null);
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
+  const [draggedEdge, setDraggedEdge] = useState<Edge | null>(null);
 
   // Reset measurement when mode changes
   useEffect(() => {
@@ -673,33 +679,98 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     // Render walls with computed geometries
     wallPolygons.forEach((wallPoly: WallPolygon) => {
       const edge = wallPoly.edge;
-        // Use computed polygon with proper corners
-        const pointsStr = wallPoly.polygon
-          .map(p => `${p.x},${p.y}`)
-          .join(' ');
+      // Use computed polygon with proper corners
+      const pointsStr = wallPoly.polygon
+        .map(p => `${p.x},${p.y}`)
+        .join(' ');
 
-        drawG.append('polygon')
-          .attr('class', 'wall')
-          .attr('points', pointsStr)
-          .attr('fill', '#333')
-          .on('mouseenter', function() {
-            d3.select(this)
-              .transition()
-              .duration(150)
-              .attr('fill', '#0066cc')
-              .attr('opacity', 0.9);
-          })
-          .on('mouseleave', function() {
-            d3.select(this)
-              .transition()
-              .duration(150)
-              .attr('fill', '#333')
-              .attr('opacity', 1);
-          })
-          .on('click', function(event) {
-            event.stopPropagation();
-            onEdgeClick?.(edge.id);
-          });
+      const wallElement = drawG.append('polygon')
+        .attr('class', 'wall')
+        .attr('points', pointsStr)
+        .attr('fill', draggedEdge?.id === edge.id ? '#0066cc' : '#333')
+        .attr('cursor', (isEditMode && !measureMode) ? 'move' : 'default')
+        .on('mouseenter', function() {
+          d3.select(this)
+            .transition()
+            .duration(150)
+            .attr('fill', '#0066cc')
+            .attr('opacity', 0.9);
+        })
+        .on('mouseleave', function() {
+          const isDragged = draggedEdge?.id === edge.id;
+          d3.select(this)
+            .transition()
+            .duration(150)
+            .attr('fill', isDragged ? '#0066cc' : '#333')
+            .attr('opacity', 1);
+        })
+        .on('click', function(event) {
+          event.stopPropagation();
+          onEdgeClick?.(edge.id);
+        });
+
+      // Add drag behavior to walls in edit mode
+      if (isEditMode && !measureMode && onNodePositionsChange) {
+        const sourceNode = nodeMap.get(edge.source);
+        const targetNode = nodeMap.get(edge.target);
+        
+        if (sourceNode && targetNode) {
+          let dragStartX = 0, dragStartY = 0;
+          let startSourceX = 0, startSourceY = 0;
+          let startTargetX = 0, startTargetY = 0;
+
+          const wallDrag = d3.drag<SVGPolygonElement, WallPolygon>()
+            .on('start', function(_event) {
+              setDraggedEdge(edge);
+              d3.select(this).attr('fill', '#0066cc');
+              
+              // Store initial positions
+              startSourceX = sourceNode.x;
+              startSourceY = sourceNode.y;
+              startTargetX = targetNode.x;
+              startTargetY = targetNode.y;
+              dragStartX = 0;
+              dragStartY = 0;
+            })
+            .on('drag', function(event) {
+              // Accumulate drag deltas
+              dragStartX += event.dx;
+              dragStartY += event.dy;
+              
+              // Update both node positions (move wall as a whole)
+              sourceNode.x = startSourceX + dragStartX;
+              sourceNode.y = startSourceY + dragStartY;
+              targetNode.x = startTargetX + dragStartX;
+              targetNode.y = startTargetY + dragStartY;
+              
+              // Update node visuals
+              drawG.selectAll('.node-group')
+                .filter((n: any) => n.id === edge.source || n.id === edge.target)
+                .attr('transform', (n: any) => `translate(${n.x},${n.y})`);
+              
+              // Recompute and update wall polygon
+              const updatedWallPolygons = computeWallPolygons([edge], nodeMap);
+              if (updatedWallPolygons.length > 0) {
+                const newPointsStr = updatedWallPolygons[0].polygon
+                  .map(p => `${p.x},${p.y}`)
+                  .join(' ');
+                d3.select(this).attr('points', newPointsStr);
+              }
+            })
+            .on('end', function() {
+              setDraggedEdge(null);
+              d3.select(this).attr('fill', '#333');
+              
+              // Notify parent of both node position changes
+              onNodePositionsChange([
+                { id: edge.source, x: sourceNode.x, y: sourceNode.y },
+                { id: edge.target, x: targetNode.x, y: targetNode.y }
+              ]);
+            });
+          
+          wallElement.call(wallDrag as any);
+        }
+      }
     });
 
     // Render doors with geometries
@@ -839,23 +910,28 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
     // Draw node points visualization
     // Radius is set to a placeholder; the zoom handler keeps it at 3 screen-pixels
-    drawG.selectAll('.node-group')
+    const nodeGroups = drawG.selectAll('.node-group')
       .data(floorPlan.nodes, (d: any) => d.id)
-      .enter()
-      .append('g')
+      .join('g')
       .attr('class', 'node-group')
-      .attr('transform', (d: Node) => `translate(${d.x},${d.y})`)
-      .each(function(_d: Node) {
-        const nodeGroup = d3.select(this);
-        
-        // Simple node dot (radius will be corrected by zoom handler)
-        nodeGroup.append('circle')
-          .attr('class', 'node-point')
-          .attr('r', 0)
-          .attr('fill', '#FF6B6B')
-          .attr('cursor', 'pointer');
+      .attr('transform', (d: Node) => `translate(${d.x},${d.y})`);
+    
+    nodeGroups.each(function(d: Node) {
+      const nodeGroup = d3.select(this);
+      
+      // Clear existing content
+      nodeGroup.selectAll('*').remove();
+      
+      // Node circle (radius will be corrected by zoom handler)
+      const radiusMultiplier = (isEditMode && !measureMode) ? 4 : 3;
+      nodeGroup.append('circle')
+        .attr('class', 'node-point')
+        .attr('r', 0)
+        .attr('fill', draggedNodeId === d.id ? '#0066cc' : '#FF6B6B')
+        .attr('cursor', (isEditMode && !measureMode) ? 'move' : 'pointer');
 
-        // Interactive hover effects
+      // Interactive hover effects
+      if (!measureMode) {
         nodeGroup.on('mouseenter', function() {
           const k = d3.zoomTransform(svgRef.current!).k;
           d3.select(this).select('.node-point')
@@ -866,13 +942,44 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         })
         .on('mouseleave', function() {
           const k = d3.zoomTransform(svgRef.current!).k;
+          const isDragged = draggedNodeId === d.id;
           d3.select(this).select('.node-point')
             .transition()
             .duration(200)
-            .attr('r', 3 / k)
-            .attr('fill', '#FF6B6B');
+            .attr('r', (isDragged ? 4 : radiusMultiplier) / k)
+            .attr('fill', isDragged ? '#0066cc' : '#FF6B6B');
         });
-      });
+      }
+    });
+
+    // Add drag behavior to nodes in edit mode
+    if (isEditMode && !measureMode && onNodePositionsChange) {
+      const drag = d3.drag<SVGGElement, Node>()
+        .on('start', function(_event, d) {
+          setDraggedNodeId(d.id);
+          d3.select(this).select('.node-point')
+            .attr('fill', '#0066cc');
+        })
+        .on('drag', function(event, d) {
+          // event.dx and event.dy are the drag deltas in the parent's coordinate system
+          // Since nodes are inside drawG (which is in data space), we just add the deltas
+          d.x += event.dx;
+          d.y += event.dy;
+          
+          // Update node position in DOM immediately for visual feedback
+          d3.select(this).attr('transform', `translate(${d.x},${d.y})`);
+        })
+        .on('end', function(_event, d) {
+          setDraggedNodeId(null);
+          d3.select(this).select('.node-point')
+            .attr('fill', '#FF6B6B');
+          
+          // Notify parent of node position change
+          onNodePositionsChange([{ id: d.id, x: d.x, y: d.y }]);
+        });
+      
+      nodeGroups.call(drag as any);
+    }
     
 
     // Center and fit the floor plan

@@ -2,9 +2,9 @@ import React, { useRef, useState } from 'react';
 import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { sampleFloorPlan } from '../data';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, type FloorPlanSummary } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, type FloorPlanSummary, type NodePositionUpdate } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
-import type { FloorPlan } from '../types';
+import type { FloorPlan, Node } from '../types';
 import './EditorLayout.css';
 
 // Get user ID from env (in production, get from auth)
@@ -22,6 +22,12 @@ export const EditorLayout: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(true);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const autoSaveTimerRef = useRef<number | null>(null);
   
   // Redesign mode state
   const [isRedesignMode, setIsRedesignMode] = useState(false);
@@ -297,6 +303,66 @@ export const EditorLayout: React.FC = () => {
     }
   };
 
+  // Handle node position changes with auto-save
+  const handleNodePositionsChange = (updatedNodes: Node[]) => {
+    if (!currentPlanId) return; // Only save if we have a plan ID
+
+    // Update local state optimistically
+    setFloorPlan(prevPlan => ({
+      ...prevPlan,
+      nodes: prevPlan.nodes.map(node => {
+        const updated = updatedNodes.find(n => n.id === node.id);
+        return updated || node;
+      })
+    }));
+
+    setHasUnsavedChanges(true);
+
+    // Clear existing timer
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+
+    // Start new 2-second debounced auto-save timer
+    autoSaveTimerRef.current = window.setTimeout(async () => {
+      setIsSaving(true);
+      setError(null);
+
+      try {
+        const nodeUpdates: NodePositionUpdate[] = updatedNodes.map(node => ({
+          id: node.id,
+          x: node.x,
+          y: node.y,
+        }));
+
+        const result = await updateFloorPlanNodes(currentPlanId, nodeUpdates);
+        const convertedPlan = convertApiToFloorPlan(result);
+        
+        // Update with server response (includes recalculated edge geometries)
+        setFloorPlan(convertedPlan);
+        setHasUnsavedChanges(false);
+      } catch (err) {
+        console.error('Failed to save node positions:', err);
+        setError(err instanceof Error ? err.message : 'Failed to save changes');
+        
+        // Optionally revert optimistic update on error
+        // (for now, we keep the local change and show an error)
+      } finally {
+        setIsSaving(false);
+        autoSaveTimerRef.current = null;
+      }
+    }, 2000); // 2-second delay
+  };
+
+  // Cleanup auto-save timer on unmount
+  React.useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current !== null) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
+
   const canSetScale = !!currentPlanId;
 
   return (
@@ -312,7 +378,11 @@ export const EditorLayout: React.FC = () => {
 
       {/* Top Header Bar */}
       <div className="canvas-header">
-        <h2>Floor Plan Editor</h2>
+        <h2>
+          Floor Plan Editor
+          {hasUnsavedChanges && <span style={{ color: '#ff9800', marginLeft: '10px', fontSize: '14px' }}>● Unsaved</span>}
+          {isSaving && <span style={{ color: '#4CAF50', marginLeft: '10px', fontSize: '14px' }}>💾 Saving...</span>}
+        </h2>
         <div className="canvas-controls">
           <button onClick={handleUploadClick} disabled={isUploading}>
             {isUploading ? 'Uploading...' : 'Upload Image'}
@@ -483,6 +553,8 @@ export const EditorLayout: React.FC = () => {
               onRoomClick={isRedesignMode ? handleToggleRoomLock : undefined}
               measureMode={isMeasureMode}
               onMeasure={handleMeasure}
+              isEditMode={isEditMode && !isRedesignMode && !isMeasureMode}
+              onNodePositionsChange={handleNodePositionsChange}
             />
           </div>
         </div>
