@@ -1496,8 +1496,17 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     centerFloorPlan(drawG, floorPlan, width, height, zoomRef.current!, drawGRef);
   }, [floorPlan, onEdgeClick, onRoomClick, selectedEdgeIds, isShiftPressed, onSelectedEdgesChange, onEdgeDelete]);
 
+  const isEmpty = floorPlan.nodes.length === 0 && floorPlan.edges.length === 0;
+
   return (
     <div className="floor-plan-canvas-container">
+      {isEmpty && (
+        <div className="canvas-empty-state">
+          <div className="canvas-empty-state__icon">⬜</div>
+          <div className="canvas-empty-state__title">Start drawing your floor plan</div>
+          <div className="canvas-empty-state__hint">Select the Wall tool and click on the canvas to place your first wall</div>
+        </div>
+      )}
       <svg
         ref={svgRef}
         style={{ cursor: measureMode || activeTool === 'wall' ? 'crosshair' : (isShiftPressed && isEditMode ? 'crosshair' : undefined) }}

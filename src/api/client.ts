@@ -182,6 +182,27 @@ export async function deleteFloorPlan(planId: string): Promise<void> {
 }
 
 /**
+ * Create a new empty floor plan (no nodes, edges, rooms, or fixtures)
+ */
+export async function createEmptyFloorPlan(
+  userId: string,
+  name?: string
+): Promise<FloorPlanDetail> {
+  const response = await fetch(`${API_BASE_URL}/floor-plans/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, name: name ?? 'Untitled' }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
  * Node position update type
  */
 export interface NodePositionUpdate {

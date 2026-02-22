@@ -3,8 +3,7 @@ import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { ToolsBar } from './ToolsBar';
 import { WallToolOptions } from './WallToolOptions';
-import { sampleFloorPlan } from '../data';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, createEmptyFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
 import type { FloorPlan, Node, Edge, EditorTool } from '../types';
 import './EditorLayout.css';
@@ -18,8 +17,9 @@ export const EditorLayout: React.FC = () => {
   const contentAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [floorPlan, setFloorPlan] = useState<FloorPlan>(sampleFloorPlan);
+  const [floorPlan, setFloorPlan] = useState<FloorPlan>({ nodes: [], edges: [] });
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
+  const currentPlanIdRef = useRef<string | null>(null);
   const [userPlans, setUserPlans] = useState<FloorPlanSummary[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
@@ -64,8 +64,6 @@ export const EditorLayout: React.FC = () => {
       edges: [...prev.edges, newEdge],
     }));
 
-    if (!currentPlanId) return;
-
     // Resolve node coordinates immediately (avoid stale closure later).
     // newNodes contains freshly created nodes; existing nodes come from floorPlan.nodes.
     const allNodes = [...floorPlan.nodes, ...newNodes];
@@ -108,7 +106,16 @@ export const EditorLayout: React.FC = () => {
       setError(null);
 
       try {
-        const result = await createEdges(currentPlanId, batch);
+        // Lazily create a backend plan on first draw if none exists yet
+        let planId = currentPlanIdRef.current;
+        if (!planId) {
+          const newPlan = await createEmptyFloorPlan(USER_ID);
+          setCurrentPlanId(newPlan.id);
+          currentPlanIdRef.current = newPlan.id;
+          planId = newPlan.id;
+          loadUserPlans(); // refresh sidebar (non-blocking)
+        }
+        const result = await createEdges(planId, batch);
         const convertedPlan = convertApiToFloorPlan(result);
         setFloorPlan(convertedPlan);
         setHasUnsavedChanges(false);
@@ -119,8 +126,13 @@ export const EditorLayout: React.FC = () => {
         setIsSaving(false);
         wallSaveTimerRef.current = null;
       }
-    }, 2000);
+    }, 300);
   };
+
+  // Keep ref in sync with state so debounced callbacks see the latest plan ID
+  React.useEffect(() => {
+    currentPlanIdRef.current = currentPlanId;
+  }, [currentPlanId]);
 
   // Load user's plans on mount
   React.useEffect(() => {
@@ -187,8 +199,10 @@ export const EditorLayout: React.FC = () => {
   };
 
   const handleNewPlan = () => {
-    setFloorPlan(sampleFloorPlan);
+    setFloorPlan({ nodes: [], edges: [] });
     setCurrentPlanId(null);
+    currentPlanIdRef.current = null;
+    setSelectedEdgeIds(new Set());
     setError(null);
   };
 
@@ -243,10 +257,12 @@ export const EditorLayout: React.FC = () => {
       setError(null);
       await deleteFloorPlan(currentPlanId);
       
-      // Reset to sample plan and clear selection
-      setFloorPlan(sampleFloorPlan);
+      // Reset to empty canvas and clear selection
+      setFloorPlan({ nodes: [], edges: [] });
       setCurrentPlanId(null);
-      
+      currentPlanIdRef.current = null;
+      setSelectedEdgeIds(new Set());
+
       // Reload plans list
       await loadUserPlans();
     } catch (err) {
@@ -404,7 +420,7 @@ export const EditorLayout: React.FC = () => {
       window.clearTimeout(autoSaveTimerRef.current);
     }
 
-    // Start new 2-second debounced auto-save timer
+    // Start new 300ms debounced auto-save timer
     autoSaveTimerRef.current = window.setTimeout(async () => {
       setIsSaving(true);
       setError(null);
@@ -432,7 +448,7 @@ export const EditorLayout: React.FC = () => {
         setIsSaving(false);
         autoSaveTimerRef.current = null;
       }
-    }, 2000); // 2-second delay
+    }, 300); // 300ms delay
   };
 
   // Cleanup auto-save timers on unmount
