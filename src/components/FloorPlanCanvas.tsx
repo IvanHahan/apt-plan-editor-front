@@ -377,6 +377,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const measureGRef = useRef<SVGGElement>(null);
   const wallPreviewGRef = useRef<SVGGElement | null>(null);
+  const dragGhostGRef = useRef<SVGGElement | null>(null);
 
   // Wall drawing state — kept in refs to avoid re-renders on every mouse move
   const wallDrawRef = useRef<{ startPoint: Point; startNodeId?: string; startSplitEdgeId?: string } | null>(null);
@@ -1449,9 +1450,17 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                   .join(' ');
                 d3.select(this).attr('points', newPointsStr);
               }
+
+              // Show ghost lines for adjacent walls (sharing one endpoint with this edge)
+              const overrides = new Map<string, Point>([
+                [edge.source, { x: sourceNode.x, y: sourceNode.y }],
+                [edge.target, { x: targetNode.x, y: targetNode.y }],
+              ]);
+              renderDragGhosts(overrides, new Set([edge.id]));
             })
             .on('end', function() {
               setDraggedEdge(null);
+              clearDragGhosts();
 
               if (!didDrag) {
                 // Treat as a click — d3 drag suppresses the native click event
@@ -1744,6 +1753,58 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       }
     });
 
+    // ============================================
+    // Ghost drag helpers — show affected edges while dragging
+    // ============================================
+    const renderDragGhosts = (overridePositions: Map<string, Point>, excludeEdgeIds?: Set<string>) => {
+      if (!dragGhostGRef.current) return;
+      const k = d3.zoomTransform(svgRef.current!).k;
+      const ghostG = d3.select(dragGhostGRef.current);
+      ghostG.selectAll('*').remove();
+
+      const walls = floorPlan.edges.filter((e: Edge) => e.type === 'wall');
+      for (const edge of walls) {
+        if (excludeEdgeIds?.has(edge.id)) continue;
+        const srcOverride = overridePositions.get(edge.source);
+        const tgtOverride = overridePositions.get(edge.target);
+        // Only render ghost for edges that have at least one moved endpoint
+        if (!srcOverride && !tgtOverride) continue;
+
+        const srcNode = nodeMap.get(edge.source);
+        const tgtNode = nodeMap.get(edge.target);
+        const srcPos = srcOverride ?? (srcNode ? { x: srcNode.x, y: srcNode.y } : null);
+        const tgtPos = tgtOverride ?? (tgtNode ? { x: tgtNode.x, y: tgtNode.y } : null);
+        if (!srcPos || !tgtPos) continue;
+
+        const thick = edge.thickness || 0.2;
+
+        // Ghost wall body — semi-transparent fill showing thickness
+        ghostG.append('line')
+          .attr('x1', srcPos.x).attr('y1', srcPos.y)
+          .attr('x2', tgtPos.x).attr('y2', tgtPos.y)
+          .attr('stroke', '#2196F3')
+          .attr('stroke-width', thick)
+          .attr('stroke-opacity', 0.22)
+          .attr('pointer-events', 'none');
+
+        // Ghost centerline — dashed blue
+        ghostG.append('line')
+          .attr('x1', srcPos.x).attr('y1', srcPos.y)
+          .attr('x2', tgtPos.x).attr('y2', tgtPos.y)
+          .attr('stroke', '#2196F3')
+          .attr('stroke-width', 2 / k)
+          .attr('stroke-dasharray', `${6 / k},${3 / k}`)
+          .attr('stroke-opacity', 0.8)
+          .attr('pointer-events', 'none');
+      }
+    };
+
+    const clearDragGhosts = () => {
+      if (dragGhostGRef.current) {
+        d3.select(dragGhostGRef.current).selectAll('*').remove();
+      }
+    };
+
     // Add drag behavior to nodes in edit mode
     if (isEditMode && !measureMode && onNodePositionsChange) {
       const drag = d3.drag<SVGGElement, Node>()
@@ -1763,11 +1824,16 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           
           // Update node position in DOM immediately for visual feedback
           d3.select(this).attr('transform', `translate(${d.x},${d.y})`);
+
+          // Show ghost lines for all edges connected to this node
+          const overrides = new Map<string, Point>([[d.id, { x: d.x, y: d.y }]]);
+          renderDragGhosts(overrides);
         })
         .on('end', function(_event, d) {
           setDraggedNodeId(null);
           d3.select(this).select('.node-point')
             .attr('fill', '#FF6B6B');
+          clearDragGhosts();
           
           // Notify parent of node position change
           onNodePositionsChange([{ id: d.id, x: d.x, y: d.y }]);
@@ -1888,6 +1954,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       >
         <g ref={gRef}>
           <g ref={drawGRef} />
+          <g ref={dragGhostGRef} />
           <g ref={wallPreviewGRef} />
           <g ref={measureGRef} />
           {selectionBox && (
