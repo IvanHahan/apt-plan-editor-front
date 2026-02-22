@@ -381,6 +381,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   wallFloorPlanEdgesRef.current = floorPlan.edges;
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
+  const selectedEdgeIdsRef = useRef(selectedEdgeIds);
+  selectedEdgeIdsRef.current = selectedEdgeIds;
 
   // Asset tool state — kept in refs to avoid re-renders on every mouse move
   interface AssetSnap {
@@ -1118,6 +1120,20 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     }
     const dataUnit = dataExtent / 500;
 
+    // Background rect for click-to-deselect (placed first so it's beneath all elements)
+    drawG.append('rect')
+      .attr('class', 'canvas-bg')
+      .attr('x', -1e6)
+      .attr('y', -1e6)
+      .attr('width', 2e6)
+      .attr('height', 2e6)
+      .attr('fill', 'transparent')
+      .on('click', function(event) {
+        if (activeToolRef.current !== 'cursor') return;
+        event.stopPropagation();
+        onSelectedEdgesChange?.([]);
+      });
+
     // Draw rooms (if available)
     if (floorPlan.rooms && floorPlan.rooms.length > 0) {
       const roomGroups = drawG.selectAll('.room-group')
@@ -1190,7 +1206,12 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         })
         .on('click', function(event, d: Room) {
           event.stopPropagation();
-          onRoomClick?.(d.id);
+          if (onRoomClick) {
+            onRoomClick(d.id);
+          } else {
+            // In cursor mode, a room click should clear edge selection
+            onSelectedEdgesChange?.([]);
+          }
         });
 
       // Add lock icon for locked rooms
@@ -1282,9 +1303,12 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .join(' ');
 
       const wallElement = drawG.append('polygon')
-        .attr('class', selectedEdgeIds.has(edge.id) ? 'wall selected' : 'wall')
+        .attr('class', selectedEdgeIdsRef.current.has(edge.id) ? 'wall selected' : 'wall')
+        .attr('data-edge-id', edge.id)
+        .attr('data-base-class', 'wall')
+        .attr('data-default-fill', '#333')
         .attr('points', pointsStr)
-        .attr('fill', draggedEdge?.id === edge.id ? '#0066cc' : (selectedEdgeIds.has(edge.id) ? '#2196F3' : '#333'))
+        .attr('fill', draggedEdge?.id === edge.id ? '#0066cc' : (selectedEdgeIdsRef.current.has(edge.id) ? '#2196F3' : '#333'))
         .attr('cursor', (isEditMode && !measureMode && activeTool !== 'assets') ? 'move' : (activeTool === 'assets' ? 'crosshair' : 'default'))
         .attr('pointer-events', activeTool === 'assets' ? 'none' : 'auto')
         .on('mouseenter', function() {
@@ -1298,7 +1322,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .on('mouseleave', function() {
           if (activeToolRef.current === 'assets') return;
           const isDragged = draggedEdge?.id === edge.id;
-          const isSelected = selectedEdgeIds.has(edge.id);
+          const isSelected = selectedEdgeIdsRef.current.has(edge.id);
           d3.select(this)
             .transition()
             .duration(150)
@@ -1310,7 +1334,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           event.stopPropagation();
           if (isShiftPressed && onSelectedEdgesChange) {
             // Toggle selection
-            const newSelection = new Set(selectedEdgeIds);
+            const newSelection = new Set(selectedEdgeIdsRef.current);
             if (newSelection.has(edge.id)) {
               newSelection.delete(edge.id);
             } else {
@@ -1342,6 +1366,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           let dragStartX = 0, dragStartY = 0;
           let startSourceX = 0, startSourceY = 0;
           let startTargetX = 0, startTargetY = 0;
+          let didDrag = false;
 
           const wallDrag = d3.drag<SVGPolygonElement, WallPolygon>()
             .filter(function() {
@@ -1351,6 +1376,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .on('start', function(_event) {
               setDraggedEdge(edge);
               d3.select(this).attr('fill', '#0066cc');
+              didDrag = false;
               
               // Store initial positions
               startSourceX = sourceNode.x;
@@ -1361,6 +1387,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
               dragStartY = 0;
             })
             .on('drag', function(event) {
+              didDrag = true;
               // Accumulate drag deltas
               dragStartX += event.dx;
               dragStartY += event.dy;
@@ -1387,7 +1414,27 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             })
             .on('end', function() {
               setDraggedEdge(null);
-              d3.select(this).attr('fill', '#333');
+
+              if (!didDrag) {
+                // Treat as a click — d3 drag suppresses the native click event
+                const isSelected = selectedEdgeIdsRef.current.has(edge.id);
+                if (isShiftPressed && onSelectedEdgesChange) {
+                  const newSelection = new Set(selectedEdgeIdsRef.current);
+                  if (isSelected) {
+                    newSelection.delete(edge.id);
+                  } else {
+                    newSelection.add(edge.id);
+                  }
+                  onSelectedEdgesChange(Array.from(newSelection));
+                } else {
+                  onSelectedEdgesChange?.([edge.id]);
+                }
+                return;
+              }
+
+              // Restore fill respecting current selection
+              const isSelected = selectedEdgeIdsRef.current.has(edge.id);
+              d3.select(this).attr('fill', isSelected ? '#2196F3' : '#333');
               
               // Notify parent of both node position changes
               onNodePositionsChange([
@@ -1407,16 +1454,19 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         // Render using polygon geometries from backend
         edge.geometries.forEach((geom) => {
           drawG.append('polygon')
-            .attr('class', 'door')
+            .attr('class', selectedEdgeIdsRef.current.has(edge.id) ? 'door selected' : 'door')
+            .attr('data-edge-id', edge.id)
+            .attr('data-base-class', 'door')
+            .attr('data-default-fill', '#8B4513')
             .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
-            .attr('fill', '#8B4513')
+            .attr('fill', selectedEdgeIdsRef.current.has(edge.id) ? '#2196F3' : '#8B4513')
             .attr('stroke', '#5C3317')
             .attr('stroke-width', 0.5 * dataUnit)
             .attr('cursor', 'pointer')
             .on('click', function(event) {
               event.stopPropagation();
               if (isShiftPressed && onSelectedEdgesChange) {
-                const newSelection = new Set(selectedEdgeIds);
+                const newSelection = new Set(selectedEdgeIdsRef.current);
                 if (newSelection.has(edge.id)) {
                   newSelection.delete(edge.id);
                 } else {
@@ -1443,14 +1493,17 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         );
 
         drawG.append('polygon')
-          .attr('class', selectedEdgeIds.has(edge.id) ? 'door selected' : 'door')
+          .attr('class', selectedEdgeIdsRef.current.has(edge.id) ? 'door selected' : 'door')
+          .attr('data-edge-id', edge.id)
+          .attr('data-base-class', 'door')
+          .attr('data-default-fill', '#D2691E')
           .attr('points', doorPolygon.map(p => `${p.x},${p.y}`).join(' '))
-          .attr('fill', selectedEdgeIds.has(edge.id) ? '#2196F3' : '#D2691E')
+          .attr('fill', selectedEdgeIdsRef.current.has(edge.id) ? '#2196F3' : '#D2691E')
           .attr('cursor', 'pointer')
           .on('click', function(event) {
             event.stopPropagation();
             if (isShiftPressed && onSelectedEdgesChange) {
-              const newSelection = new Set(selectedEdgeIds);
+              const newSelection = new Set(selectedEdgeIdsRef.current);
               if (newSelection.has(edge.id)) {
                 newSelection.delete(edge.id);
               } else {
@@ -1495,14 +1548,17 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         // Render using polygon geometries from backend
         edge.geometries.forEach((geom) => {
           drawG.append('polygon')
-            .attr('class', selectedEdgeIds.has(edge.id) ? 'window selected' : 'window')
+            .attr('class', selectedEdgeIdsRef.current.has(edge.id) ? 'window selected' : 'window')
+            .attr('data-edge-id', edge.id)
+            .attr('data-base-class', 'window')
+            .attr('data-default-fill', '#87CEEB')
             .attr('points', geom.polygon_coords.map(([x, y]) => `${x},${y}`).join(' '))
-            .attr('fill', selectedEdgeIds.has(edge.id) ? '#2196F3' : '#87CEEB')
+            .attr('fill', selectedEdgeIdsRef.current.has(edge.id) ? '#2196F3' : '#87CEEB')
             .attr('cursor', 'pointer')
             .on('click', function(event) {
               event.stopPropagation();
               if (isShiftPressed && onSelectedEdgesChange) {
-                const newSelection = new Set(selectedEdgeIds);
+                const newSelection = new Set(selectedEdgeIdsRef.current);
                 if (newSelection.has(edge.id)) {
                   newSelection.delete(edge.id);
                 } else {
@@ -1541,14 +1597,17 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
         // Window frame
         drawG.append('polygon')
-          .attr('class', selectedEdgeIds.has(edge.id) ? 'window selected' : 'window')
+          .attr('class', selectedEdgeIdsRef.current.has(edge.id) ? 'window selected' : 'window')
+          .attr('data-edge-id', edge.id)
+          .attr('data-base-class', 'window')
+          .attr('data-default-fill', '#B0E0E6')
           .attr('points', windowPolygon.map(p => `${p.x},${p.y}`).join(' '))
-          .attr('fill', selectedEdgeIds.has(edge.id) ? '#2196F3' : '#B0E0E6')
+          .attr('fill', selectedEdgeIdsRef.current.has(edge.id) ? '#2196F3' : '#B0E0E6')
           .attr('cursor', 'pointer')
           .on('click', function(event) {
             event.stopPropagation();
             if (isShiftPressed && onSelectedEdgesChange) {
-              const newSelection = new Set(selectedEdgeIds);
+              const newSelection = new Set(selectedEdgeIdsRef.current);
               if (newSelection.has(edge.id)) {
                 newSelection.delete(edge.id);
               } else {
@@ -1731,7 +1790,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           const maxY = Math.max(selectionBox.y1, selectionBox.y2);
           
           // Check which edges fall within the selection box
-          const selectedIds = new Set(selectedEdgeIds);
+          const selectedIds = new Set(selectedEdgeIdsRef.current);
           floorPlan.edges.forEach((edge: Edge) => {
             const sourceNode = nodeMap.get(edge.source);
             const targetNode = nodeMap.get(edge.target);
@@ -1755,16 +1814,24 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       svg.call(selectionDrag as any);
     }
 
-    // Clear selection when clicking on empty canvas background (cursor mode only)
-    svg.on('click.bgClear', function() {
-      if (activeToolRef.current !== 'cursor') return;
-      if (isShiftPressed) return;
-      onSelectedEdgesChange?.([]);
-    });
-
     // Center and fit the floor plan
     centerFloorPlan(drawG, floorPlan, width, height, zoomRef.current!, drawGRef);
-  }, [floorPlan, onEdgeClick, onRoomClick, selectedEdgeIds, isShiftPressed, onSelectedEdgesChange, onEdgeDelete, activeTool]);
+  }, [floorPlan, onEdgeClick, onRoomClick, isShiftPressed, onSelectedEdgesChange, onEdgeDelete, activeTool]);
+
+  // Lightweight effect: update edge visual styles when selection changes without rebuilding D3
+  useEffect(() => {
+    if (!drawGRef.current) return;
+    d3.select(drawGRef.current).selectAll<Element, unknown>('[data-edge-id]').each(function() {
+      const el = d3.select(this);
+      const edgeId = el.attr('data-edge-id');
+      if (!edgeId) return;
+      const isSelected = selectedEdgeIds.has(edgeId);
+      const baseClass = el.attr('data-base-class') || 'wall';
+      const defaultFill = el.attr('data-default-fill') || '#333';
+      el.attr('class', isSelected ? `${baseClass} selected` : baseClass)
+        .attr('fill', isSelected ? '#2196F3' : defaultFill);
+    });
+  }, [selectedEdgeIds]);
 
   const isEmpty = floorPlan.nodes.length === 0 && floorPlan.edges.length === 0;
 
