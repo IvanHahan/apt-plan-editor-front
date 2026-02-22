@@ -3,7 +3,7 @@ import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { ToolsBar } from './ToolsBar';
 import { WallToolOptions } from './WallToolOptions';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, createEmptyFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, createEmptyFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, updateFloorPlan, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
 import type { FloorPlan, Node, Edge, EditorTool } from '../types';
 import './EditorLayout.css';
@@ -46,6 +46,10 @@ export const EditorLayout: React.FC = () => {
   const [measuredPixelDistance, setMeasuredPixelDistance] = useState<number | null>(null);
   const [metersInput, setMetersInput] = useState('');
   const [isNormalizingScale, setIsNormalizingScale] = useState(false);
+
+  // Rename state
+  const [renamingPlanId, setRenamingPlanId] = useState<string | null>(null);
+  const [renameInputValue, setRenameInputValue] = useState('');
 
   // Edge selection state
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<Set<string>>(new Set());
@@ -242,6 +246,30 @@ export const EditorLayout: React.FC = () => {
     if (svg) {
       svg.dispatchEvent(new CustomEvent('resetZoom'));
     }
+  };
+
+  const handleStartRename = (plan: FloorPlanSummary, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingPlanId(plan.id);
+    setRenameInputValue(plan.name || '');
+  };
+
+  const handleSubmitRename = async (planId: string) => {
+    const name = renameInputValue.trim();
+    setRenamingPlanId(null);
+    if (!name) return;
+    try {
+      await updateFloorPlan(planId, name);
+      setUserPlans(prev => prev.map(p => p.id === planId ? { ...p, name } : p));
+    } catch (err) {
+      console.error('Failed to rename plan:', err);
+      setError(err instanceof Error ? err.message : 'Failed to rename plan');
+    }
+  };
+
+  const handleRenameKeyDown = (e: React.KeyboardEvent, planId: string) => {
+    if (e.key === 'Enter') handleSubmitRename(planId);
+    if (e.key === 'Escape') setRenamingPlanId(null);
   };
 
   const handleDeletePlan = async () => {
@@ -637,15 +665,39 @@ export const EditorLayout: React.FC = () => {
             {userPlans.map(plan => (
               <div 
                 key={plan.id}
-                className="project-item"
-                onClick={() => handleLoadPlan(plan.id)}
+                className={`project-item${currentPlanId === plan.id ? ' active' : ''}`}
+                onClick={() => renamingPlanId === plan.id ? undefined : handleLoadPlan(plan.id)}
                 style={{ 
-                  cursor: 'pointer',
-                  fontWeight: currentPlanId === plan.id ? 'bold' : 'normal',
+                  cursor: renamingPlanId === plan.id ? 'default' : 'pointer',
                   fontSize: '12px'
                 }}
               >
-                📐 {plan.name || 'Untitled'} 
+                {renamingPlanId === plan.id ? (
+                  <input
+                    autoFocus
+                    value={renameInputValue}
+                    onChange={e => setRenameInputValue(e.target.value)}
+                    onBlur={() => handleSubmitRename(plan.id)}
+                    onKeyDown={e => handleRenameKeyDown(e, plan.id)}
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      width: '100%',
+                      fontSize: '12px',
+                      padding: '2px 4px',
+                      border: '1px solid #aaa',
+                      borderRadius: '3px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                ) : (
+                  <span
+                    onDoubleClick={e => handleStartRename(plan, e)}
+                    title="Double-click to rename"
+                    style={{ fontWeight: currentPlanId === plan.id ? 'bold' : 'normal' }}
+                  >
+                    📐 {plan.name || 'Untitled'}
+                  </span>
+                )}
                 <br />
                 <span style={{ color: '#666' }}>
                   {plan.rooms_count} rooms
