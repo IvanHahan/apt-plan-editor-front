@@ -47,7 +47,9 @@ export const WallToolOptions: React.FC<WallToolOptionsProps> = ({
             {p.label}
           </option>
         ))}
-        <option value="custom">Custom ({currentCm} cm)</option>
+        {!matchedPreset && (
+          <option value="custom">Custom ({currentCm} cm)</option>
+        )}
       </select>
 
       <input

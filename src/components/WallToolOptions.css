@@ -26,6 +26,8 @@
   color: #1a237e;
   cursor: pointer;
   outline: none;
+  width: 130px;
+  flex-shrink: 0;
 }
 
 .wall-preset-select:focus {
@@ -44,6 +46,8 @@
   font-size: 13px;
   color: #1565c0;
   font-weight: 500;
-  min-width: 46px;
+  width: 46px;
+  text-align: right;
   white-space: nowrap;
+  flex-shrink: 0;
 }
