@@ -481,6 +481,126 @@ function createDoorArc(x1: number, y1: number, x2: number, y2: number, radius: n
   return `M ${x1} ${y1} A ${radius} ${radius} 0 0 1 ${endX} ${endY}`;
 }
 
+// ============================================
+// Geometry Annotation Helpers
+// ============================================
+
+/**
+ * Render a dimension label along a segment p1→p2, offset perpendicularly.
+ * Uses orange (#FF9800) colour for lengths.
+ */
+function renderLengthLabel(
+  g: d3.Selection<SVGGElement, unknown, null, undefined>,
+  p1: Point, p2: Point,
+  text: string,
+  k: number,
+): void {
+  const dir = vecNorm(vecSub(p2, p1));
+  const perp = vecPerp(dir);
+  const offset = 18 / k;
+  const tickLen = 6 / k;
+  const fontSize = 11 / k;
+  const pad = 3 / k;
+
+  // Extension lines from each endpoint to the dimension line
+  for (const pt of [p1, p2]) {
+    g.append('line')
+      .attr('x1', pt.x).attr('y1', pt.y)
+      .attr('x2', pt.x + perp.x * offset).attr('y2', pt.y + perp.y * offset)
+      .attr('stroke', '#FF9800').attr('stroke-width', 0.8 / k)
+      .attr('stroke-dasharray', `${4 / k},${2 / k}`)
+      .attr('pointer-events', 'none');
+  }
+  // Dimension line parallel to the segment
+  g.append('line')
+    .attr('x1', p1.x + perp.x * offset).attr('y1', p1.y + perp.y * offset)
+    .attr('x2', p2.x + perp.x * offset).attr('y2', p2.y + perp.y * offset)
+    .attr('stroke', '#FF9800').attr('stroke-width', 1.2 / k)
+    .attr('pointer-events', 'none');
+  // Tick caps at each end of the dimension line
+  for (const pt of [p1, p2]) {
+    const tx = pt.x + perp.x * offset;
+    const ty = pt.y + perp.y * offset;
+    g.append('line')
+      .attr('x1', tx - dir.x * tickLen / 2).attr('y1', ty - dir.y * tickLen / 2)
+      .attr('x2', tx + dir.x * tickLen / 2).attr('y2', ty + dir.y * tickLen / 2)
+      .attr('stroke', '#FF9800').attr('stroke-width', 1.2 / k)
+      .attr('pointer-events', 'none');
+  }
+  // Label
+  const dmx = (p1.x + p2.x) / 2 + perp.x * offset;
+  const dmy = (p1.y + p2.y) / 2 + perp.y * offset;
+  const bgRect = g.append('rect')
+    .attr('fill', 'rgba(0,0,0,0.72)').attr('rx', 2 / k).attr('pointer-events', 'none');
+  const textEl = g.append('text')
+    .attr('x', dmx).attr('y', dmy)
+    .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+    .attr('font-size', `${fontSize}px`).attr('fill', '#FF9800')
+    .attr('font-family', 'monospace').attr('font-weight', 'bold')
+    .attr('pointer-events', 'none')
+    .text(text);
+  try {
+    const bbox = (textEl.node() as SVGGraphicsElement).getBBox();
+    bgRect
+      .attr('x', bbox.x - pad).attr('y', bbox.y - pad)
+      .attr('width', bbox.width + 2 * pad).attr('height', bbox.height + 2 * pad);
+  } catch (_) { /* getBBox unavailable outside live DOM */ }
+}
+
+/**
+ * Render angle arcs between consecutive sorted direction angles at a node.
+ * Uses cyan (#00BCD4) colour for angles.
+ * dirAngles must be sorted ascending (radians).
+ */
+function renderAngleArcs(
+  g: d3.Selection<SVGGElement, unknown, null, undefined>,
+  center: Point,
+  dirAngles: number[],
+  k: number,
+): void {
+  const n = dirAngles.length;
+  if (n < 2) return;
+  const arcRadius = 20 / k;
+  const fontSize = 11 / k;
+  const pad = 2 / k;
+  for (let i = 0; i < n; i++) {
+    const a1 = dirAngles[i];
+    const a2 = dirAngles[(i + 1) % n];
+    let sweep = a2 - a1;
+    if (sweep <= 0) sweep += Math.PI * 2;
+    const deg = (sweep * 180 / Math.PI).toFixed(1);
+    const startX = center.x + arcRadius * Math.cos(a1);
+    const startY = center.y + arcRadius * Math.sin(a1);
+    const endX   = center.x + arcRadius * Math.cos(a2);
+    const endY   = center.y + arcRadius * Math.sin(a2);
+    const largeArc = sweep > Math.PI ? 1 : 0;
+    g.append('path')
+      .attr('d', `M ${startX} ${startY} A ${arcRadius} ${arcRadius} 0 ${largeArc} 1 ${endX} ${endY}`)
+      .attr('fill', 'none')
+      .attr('stroke', '#00BCD4').attr('stroke-width', 1.2 / k)
+      .attr('pointer-events', 'none');
+    const midAngle = a1 + sweep / 2;
+    const labelRadius = arcRadius + 14 / k;
+    const lx = center.x + labelRadius * Math.cos(midAngle);
+    const ly = center.y + labelRadius * Math.sin(midAngle);
+    const bgRect = g.append('rect')
+      .attr('fill', 'rgba(0,0,0,0.72)').attr('rx', 2 / k).attr('pointer-events', 'none');
+    const textEl = g.append('text')
+      .attr('x', lx).attr('y', ly)
+      .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+      .attr('font-size', `${fontSize}px`).attr('fill', '#00BCD4')
+      .attr('font-family', 'monospace').attr('font-weight', 'bold')
+      .attr('pointer-events', 'none')
+      .text(`${deg}°`);
+    try {
+      const bbox = (textEl.node() as SVGGraphicsElement).getBBox();
+      bgRect
+        .attr('x', bbox.x - pad).attr('y', bbox.y - pad)
+        .attr('width', bbox.width + 2 * pad).attr('height', bbox.height + 2 * pad);
+    } catch (_) { /* getBBox unavailable outside live DOM */ }
+  }
+}
+
 export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   floorPlan,
   onEdgeClick,
@@ -507,6 +627,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const wallPreviewGRef = useRef<SVGGElement | null>(null);
   const dragGhostGRef = useRef<SVGGElement | null>(null);
   const guidelineGRef = useRef<SVGGElement | null>(null);
+  const annotationGRef = useRef<SVGGElement | null>(null);
 
   // Wall drawing state — kept in refs to avoid re-renders on every mouse move
   const wallDrawRef = useRef<{ startPoint: Point; startNodeId?: string; startSplitEdgeId?: string } | null>(null);
@@ -790,6 +911,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const clearGuidelines = () => {
     if (guidelineGRef.current) d3.select(guidelineGRef.current).selectAll('*').remove();
   };
+  const clearAnnotations = () => {
+    if (annotationGRef.current) d3.select(annotationGRef.current).selectAll('*').remove();
+  };
   // ─────────────────────────────────────────────────────────────────────────────
 
   // ============================================
@@ -803,6 +927,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         d3.select(wallPreviewGRef.current).selectAll('*').remove();
       }
       clearGuidelines();
+      clearAnnotations();
       // Clear any lingering snap highlight
       if (wallSnapNodeRef.current && drawGRef.current) {
         d3.select(drawGRef.current)
@@ -1094,6 +1219,15 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .attr('stroke-width', 1.5 / k)
         .attr('pointer-events', 'none');
 
+      // Length label for the wall being drawn
+      const wallLen = vecLen(vecSub(endPoint, startPoint));
+      if (annotationGRef.current && wallLen > 1e-6) {
+        const ag = d3.select(annotationGRef.current as SVGGElement);
+        ag.selectAll('*').remove();
+        const wallLenM = wallLen / unitScaleRef.current;
+        renderLengthLabel(ag, startPoint, endPoint, `${wallLenM.toFixed(2)} m`, k);
+      }
+
       // Edge-snap dot drawn last so it renders on top of the preview line
       updateEdgeSnapHighlight(snapEdge);
     };
@@ -1103,6 +1237,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         wallDrawRef.current = null;
         if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
         clearGuidelines();
+        clearAnnotations();
         updateSnapHighlight(null);
         updateEdgeSnapHighlight(null);
       }
@@ -1588,6 +1723,24 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .duration(150)
             .attr('fill', '#0066cc')
             .attr('opacity', 0.9);
+          // Show 4 polygon-side lengths on hover
+          if (annotationGRef.current) {
+            const wallPolysForEdge = computeWallPolygons([edge], nodeMap);
+            if (wallPolysForEdge.length > 0) {
+              const poly = wallPolysForEdge[0].polygon;
+              const kHov = d3.zoomTransform(svgRef.current!).k;
+              const ag = d3.select(annotationGRef.current as SVGGElement);
+              ag.selectAll('*').remove();
+              const us = unitScaleRef.current;
+              for (let si = 0; si < poly.length; si++) {
+                const pa = poly[si];
+                const pb = poly[(si + 1) % poly.length];
+                const sideLen = vecLen(vecSub(pb, pa));
+                if (sideLen < 1e-6) continue;
+                renderLengthLabel(ag, pa, pb, `${(sideLen / us).toFixed(2)} m`, kHov);
+              }
+            }
+          }
         })
         .on('mouseleave', function() {
           if (activeToolRef.current === 'assets') return;
@@ -1598,6 +1751,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .duration(150)
             .attr('fill', isDragged ? '#0066cc' : (isSelected ? '#2196F3' : '#333'))
             .attr('opacity', 1);
+          clearAnnotations();
         })
         .on('click', function(event) {
           if (activeToolRef.current === 'assets') return;
@@ -1688,10 +1842,30 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                 [edge.target, { x: targetNode.x, y: targetNode.y }],
               ]);
               renderDragGhosts(overrides, new Set([edge.id]));
+              // Show length labels for all edges sharing the moved nodes
+              if (annotationGRef.current) {
+                const kEdgeDrag = d3.zoomTransform(svgRef.current!).k;
+                const ag = d3.select(annotationGRef.current as SVGGElement);
+                ag.selectAll('*').remove();
+                const us = unitScaleRef.current;
+                const sharedEdges = wallFloorPlanEdgesRef.current.filter(e =>
+                  e.source === edge.source || e.target === edge.source ||
+                  e.source === edge.target || e.target === edge.target
+                );
+                for (const se of sharedEdges) {
+                  const srcPt = overrides.get(se.source) ?? (nodeMap.get(se.source) ? { x: nodeMap.get(se.source)!.x, y: nodeMap.get(se.source)!.y } : null);
+                  const tgtPt = overrides.get(se.target) ?? (nodeMap.get(se.target) ? { x: nodeMap.get(se.target)!.x, y: nodeMap.get(se.target)!.y } : null);
+                  if (!srcPt || !tgtPt) continue;
+                  const segLen = vecLen(vecSub(tgtPt, srcPt));
+                  if (segLen < 1e-6) continue;
+                  renderLengthLabel(ag, srcPt, tgtPt, `${(segLen / us).toFixed(2)} m`, kEdgeDrag);
+                }
+              }
             })
             .on('end', function() {
               setDraggedEdge(null);
               clearDragGhosts();
+              clearAnnotations();
 
               if (!didDrag) {
                 // Treat as a click — d3 drag suppresses the native click event
@@ -1971,6 +2145,23 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .duration(200)
             .attr('r', 5 / k)
             .attr('fill', '#0066cc');
+          // Show angles between all wall edges connected to this node
+          if (annotationGRef.current) {
+            const connEdges = wallFloorPlanEdgesRef.current.filter(
+              e => e.type === 'wall' && (e.source === d.id || e.target === d.id)
+            );
+            if (connEdges.length >= 2) {
+              const angles = connEdges.map(e => {
+                const otherId = e.source === d.id ? e.target : e.source;
+                const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
+                return other ? Math.atan2(other.y - d.y, other.x - d.x) : null;
+              }).filter((a): a is number => a !== null);
+              angles.sort((a, b) => a - b);
+              const ag = d3.select(annotationGRef.current as SVGGElement);
+              ag.selectAll('*').remove();
+              renderAngleArcs(ag, d, angles, k);
+            }
+          }
         })
         .on('mouseleave', function() {
           const k = d3.zoomTransform(svgRef.current!).k;
@@ -1980,6 +2171,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .duration(200)
             .attr('r', (isDragged ? 4 : radiusMultiplier) / k)
             .attr('fill', isDragged ? '#0066cc' : '#FF6B6B');
+          clearAnnotations();
         });
       }
     });
@@ -2156,6 +2348,29 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           // Show ghost lines for all edges connected to this node
           const overrides = new Map<string, Point>([[d.id, { x: d.x, y: d.y }]]);
           renderDragGhosts(overrides);
+          // Show length labels + angle arcs around dragged node
+          if (annotationGRef.current) {
+            const ag = d3.select(annotationGRef.current as SVGGElement);
+            ag.selectAll('*').remove();
+            const us = unitScaleRef.current;
+            for (const edge of connectedEdges) {
+              const otherId = edge.source === d.id ? edge.target : edge.source;
+              const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
+              if (!other) continue;
+              const segLen = vecLen(vecSub({ x: d.x, y: d.y }, other));
+              if (segLen < 1e-6) continue;
+              renderLengthLabel(ag, { x: d.x, y: d.y }, other, `${(segLen / us).toFixed(2)} m`, kDrag);
+            }
+            if (connectedEdges.length >= 2) {
+              const angles = connectedEdges.map(e => {
+                const otherId = e.source === d.id ? e.target : e.source;
+                const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
+                return other ? Math.atan2(other.y - d.y, other.x - d.x) : null;
+              }).filter((a): a is number => a !== null);
+              angles.sort((a, b) => a - b);
+              renderAngleArcs(ag, { x: d.x, y: d.y }, angles, kDrag);
+            }
+          }
         })
         .on('end', function(_event, d) {
           setDraggedNodeId(null);
@@ -2166,6 +2381,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           delete (this as any).__rawY;
           clearDragGhosts();
           clearGuidelines();
+          clearAnnotations();
 
           // Notify parent of node position change
           onNodePositionsChange([{ id: d.id, x: d.x, y: d.y }]);
@@ -2287,6 +2503,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         <g ref={gRef}>
           <g ref={drawGRef} />
           <g ref={dragGhostGRef} />
+          <g ref={annotationGRef} />
           <g ref={guidelineGRef} />
           <g ref={wallPreviewGRef} />
           <g ref={measureGRef} />
