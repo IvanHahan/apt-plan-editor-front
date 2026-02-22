@@ -557,11 +557,6 @@ export const EditorLayout: React.FC = () => {
   const handleAssetPlace = async (placement: AssetPlacement) => {
     const { wallEdge, wallSourceNode, wallTargetNode, assetStartPt, assetEndPt } = placement;
 
-    const assetStartId = crypto.randomUUID();
-    const assetEndId = crypto.randomUUID();
-    const assetStartNode: Node = { id: assetStartId, x: assetStartPt.x, y: assetStartPt.y };
-    const assetEndNode: Node = { id: assetEndId, x: assetEndPt.x, y: assetEndPt.y };
-
     const MIN_SEG = 1; // data units — skip degenerate wall stubs
     const dx1 = assetStartPt.x - wallSourceNode.x;
     const dy1 = assetStartPt.y - wallSourceNode.y;
@@ -569,6 +564,13 @@ export const EditorLayout: React.FC = () => {
     const dy2 = wallTargetNode.y - assetEndPt.y;
     const seg1Len = Math.hypot(dx1, dy1);
     const seg2Len = Math.hypot(dx2, dy2);
+
+    // If the asset is flush with a wall endpoint, reuse that node instead of
+    // creating a duplicate disconnected node at the same position.
+    const assetStartId = seg1Len < MIN_SEG ? wallSourceNode.id : crypto.randomUUID();
+    const assetEndId   = seg2Len < MIN_SEG ? wallTargetNode.id : crypto.randomUUID();
+    const assetStartNode: Node = { id: assetStartId, x: assetStartPt.x, y: assetStartPt.y };
+    const assetEndNode: Node   = { id: assetEndId,   x: assetEndPt.x,   y: assetEndPt.y   };
 
     const newEdgesData: NewEdgeData[] = [];
     if (seg1Len >= MIN_SEG) {
@@ -597,10 +599,13 @@ export const EditorLayout: React.FC = () => {
       });
     }
 
-    // Optimistic update
+    // Optimistic update — only add nodes that are genuinely new (not reusing existing endpoints)
+    const newNodes: Node[] = [];
+    if (seg1Len >= MIN_SEG) newNodes.push(assetStartNode);
+    if (seg2Len >= MIN_SEG) newNodes.push(assetEndNode);
     setFloorPlan((prev) => ({
       ...prev,
-      nodes: [...prev.nodes, assetStartNode, assetEndNode],
+      nodes: [...prev.nodes, ...newNodes],
       edges: prev.edges.filter((e) => e.id !== wallEdge.id).concat(
         newEdgesData.map((ed, i) => ({
           id: `optimistic-asset-${i}-${Date.now()}`,
