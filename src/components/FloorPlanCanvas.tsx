@@ -1219,13 +1219,52 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .attr('stroke-width', 1.5 / k)
         .attr('pointer-events', 'none');
 
-      // Length label for the wall being drawn
-      const wallLen = vecLen(vecSub(endPoint, startPoint));
-      if (annotationGRef.current && wallLen > 1e-6) {
+      // Annotation overlay: length + angles at snapped nodes
+      if (annotationGRef.current) {
         const ag = d3.select(annotationGRef.current as SVGGElement);
         ag.selectAll('*').remove();
-        const wallLenM = wallLen / unitScaleRef.current;
-        renderLengthLabel(ag, startPoint, endPoint, `${wallLenM.toFixed(2)} m`, k);
+        const us = unitScaleRef.current;
+        const wallLen = vecLen(vecSub(endPoint, startPoint));
+        // Length label along the preview wall
+        if (wallLen > 1e-6) {
+          const wallLenM = wallLen / us;
+          renderLengthLabel(ag, startPoint, endPoint, `${wallLenM.toFixed(2)} m`, k);
+        }
+        // Angles at start node (if snapped to an existing node)
+        const startNodeId = wallDrawRef.current.startNodeId;
+        if (startNodeId) {
+          const connectedAtStart = wallFloorPlanEdgesRef.current.filter(
+            e => e.type === 'wall' && (e.source === startNodeId || e.target === startNodeId)
+          );
+          // Include the new wall direction toward endPoint
+          const newWallAngle = Math.atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x);
+          const existingAngles = connectedAtStart.map(e => {
+            const otherId = e.source === startNodeId ? e.target : e.source;
+            const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
+            return other ? Math.atan2(other.y - startPoint.y, other.x - startPoint.x) : null;
+          }).filter((a): a is number => a !== null);
+          const allAnglesAtStart = [...existingAngles, newWallAngle].sort((a, b) => a - b);
+          if (allAnglesAtStart.length >= 2) {
+            renderAngleArcs(ag, startPoint, allAnglesAtStart, k);
+          }
+        }
+        // Angles at end node (if snapped to an existing node)
+        if (snapNode) {
+          const connectedAtEnd = wallFloorPlanEdgesRef.current.filter(
+            e => e.type === 'wall' && (e.source === snapNode.id || e.target === snapNode.id)
+          );
+          // Include the new wall direction toward startPoint
+          const newWallAngleAtEnd = Math.atan2(startPoint.y - endPoint.y, startPoint.x - endPoint.x);
+          const existingAnglesAtEnd = connectedAtEnd.map(e => {
+            const otherId = e.source === snapNode.id ? e.target : e.source;
+            const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
+            return other ? Math.atan2(other.y - endPoint.y, other.x - endPoint.x) : null;
+          }).filter((a): a is number => a !== null);
+          const allAnglesAtEnd = [...existingAnglesAtEnd, newWallAngleAtEnd].sort((a, b) => a - b);
+          if (allAnglesAtEnd.length >= 2) {
+            renderAngleArcs(ag, endPoint, allAnglesAtEnd, k);
+          }
+        }
       }
 
       // Edge-snap dot drawn last so it renders on top of the preview line
@@ -1723,11 +1762,12 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .duration(150)
             .attr('fill', '#0066cc')
             .attr('opacity', 0.9);
-          // Show 4 polygon-side lengths on hover
+          // Show 4 miter-correct polygon-side lengths on hover
+          // Use the already-computed wallPolygons (includes all adjacent walls for proper miter)
           if (annotationGRef.current) {
-            const wallPolysForEdge = computeWallPolygons([edge], nodeMap);
-            if (wallPolysForEdge.length > 0) {
-              const poly = wallPolysForEdge[0].polygon;
+            const miterPoly = wallPolygons.find(wp => wp.edge.id === edge.id);
+            if (miterPoly) {
+              const poly = miterPoly.polygon;
               const kHov = d3.zoomTransform(svgRef.current!).k;
               const ag = d3.select(annotationGRef.current as SVGGElement);
               ag.selectAll('*').remove();
