@@ -1318,7 +1318,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             }
             onSelectedEdgesChange(Array.from(newSelection));
           } else {
-            onEdgeClick?.(edge.id);
+            onSelectedEdgesChange?.([edge.id]);
           }
         })
         .on('contextmenu', function(event) {
@@ -1415,7 +1415,17 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .attr('cursor', 'pointer')
             .on('click', function(event) {
               event.stopPropagation();
-              onEdgeClick?.(edge.id);
+              if (isShiftPressed && onSelectedEdgesChange) {
+                const newSelection = new Set(selectedEdgeIds);
+                if (newSelection.has(edge.id)) {
+                  newSelection.delete(edge.id);
+                } else {
+                  newSelection.add(edge.id);
+                }
+                onSelectedEdgesChange(Array.from(newSelection));
+              } else {
+                onSelectedEdgesChange?.([edge.id]);
+              }
             });
         });
       } else {
@@ -1448,7 +1458,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
               }
               onSelectedEdgesChange(Array.from(newSelection));
             } else {
-              onEdgeClick?.(edge.id);
+              onSelectedEdgesChange?.([edge.id]);
             }
           })
           .on('contextmenu', function(event) {
@@ -1500,7 +1510,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                 }
                 onSelectedEdgesChange(Array.from(newSelection));
               } else {
-                onEdgeClick?.(edge.id);
+                onSelectedEdgesChange?.([edge.id]);
               }
             })
             .on('contextmenu', function(event) {
@@ -1546,7 +1556,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
               }
               onSelectedEdgesChange(Array.from(newSelection));
             } else {
-              onEdgeClick?.(edge.id);
+              onSelectedEdgesChange?.([edge.id]);
             }
           })
           .on('contextmenu', function(event) {
@@ -1744,6 +1754,13 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       
       svg.call(selectionDrag as any);
     }
+
+    // Clear selection when clicking on empty canvas background (cursor mode only)
+    svg.on('click.bgClear', function() {
+      if (activeToolRef.current !== 'cursor') return;
+      if (isShiftPressed) return;
+      onSelectedEdgesChange?.([]);
+    });
 
     // Center and fit the floor plan
     centerFloorPlan(drawG, floorPlan, width, height, zoomRef.current!, drawGRef);
