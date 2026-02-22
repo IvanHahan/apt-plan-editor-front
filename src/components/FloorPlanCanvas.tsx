@@ -41,13 +41,16 @@ interface WallPolygon {
 }
 
 // ─── Guideline descriptors ────────────────────────────────────────────────────
-type GuidelineOrientation = 'horizontal' | 'vertical';
+type GuidelineOrientation = 'horizontal' | 'vertical' | 'along';
 
 interface Guideline {
-  /** 'horizontal' = constant-y guide, 'vertical' = constant-x guide (data-space) */
   orientation: GuidelineOrientation;
-  /** Fixed coordinate value in data-space */
-  value: number;
+  /** Fixed coordinate value in data-space ('horizontal' / 'vertical') */
+  value?: number;
+  /** Anchor point in data-space ('along') */
+  anchor?: Point;
+  /** Unit direction vector in data-space ('along') */
+  direction?: Point;
   color?: string;
   label?: string;
 }
@@ -337,6 +340,67 @@ function computeWallPolygons(walls: Edge[], nodeMap: Map<string, Node>): WallPol
   }
   
   return result;
+}
+
+/**
+ * Snap `end` so the direction start→end is parallel to an existing wall.
+ *
+ * Computes the perpendicular screen-pixel distance from `end` to the line
+ * through `start` in each reference wall's direction.  Returns the snap with
+ * the smallest deviation when it falls within `snapPx`, or null.
+ *
+ * `excludeNodeId` — skip walls already connected to the draw start-node to
+ * avoid self-referential snapping.
+ */
+function snapToParallel(
+  start: Point,
+  end: Point,
+  edges: Edge[],
+  nodes: Node[],
+  excludeNodeId: string | null,
+  k: number,
+  snapPx = AXIS_SNAP_PX,
+  minLenPx = AXIS_SNAP_MIN_LEN_PX,
+): { point: Point; guidelines: Guideline[] } | null {
+  const currentDx = end.x - start.x;
+  const currentDy = end.y - start.y;
+  if (Math.hypot(currentDx, currentDy) * k < minLenPx) return null;
+  const currentLen = Math.hypot(currentDx, currentDy);
+  const currentNormX = currentDx / currentLen;
+  const currentNormY = currentDy / currentLen;
+
+  let bestDev = snapPx;
+  let bestResult: { point: Point; guidelines: Guideline[] } | null = null;
+
+  for (const edge of edges) {
+    if (excludeNodeId && (edge.source === excludeNodeId || edge.target === excludeNodeId)) continue;
+    const fromNode = nodes.find(n => n.id === edge.source);
+    const toNode   = nodes.find(n => n.id === edge.target);
+    if (!fromNode || !toNode) continue;
+    const refDx = toNode.x - fromNode.x;
+    const refDy = toNode.y - fromNode.y;
+    const refLen = Math.hypot(refDx, refDy);
+    if (refLen < 1e-6) continue;
+    const refDirX = refDx / refLen;
+    const refDirY = refDy / refLen;
+
+    // Must be roughly parallel (|dot| > 0.5 ≈ within 60° of each other)
+    const dot = Math.abs(currentNormX * refDirX + currentNormY * refDirY);
+    if (dot < 0.5) continue;
+
+    // Perpendicular dist (screen px) from `end` to line through `start` in refDir
+    const perpPx = Math.abs(currentDx * refDirY - currentDy * refDirX) * k;
+    if (perpPx >= bestDev) continue;
+
+    // Project `end` onto the parallel line through `start`
+    const t = currentDx * refDirX + currentDy * refDirY;
+    bestDev = perpPx;
+    bestResult = {
+      point: { x: start.x + t * refDirX, y: start.y + t * refDirY },
+      guidelines: [{ orientation: 'along', anchor: start, direction: { x: refDirX, y: refDirY }, color: '#FF9800' }],
+    };
+  }
+  return bestResult;
 }
 
 /**
@@ -696,17 +760,27 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       const color = g.color ?? '#4CAF50';
       const sw = 1 / k;
       const da = `${8 / k},${4 / k}`;
-      if (g.orientation === 'horizontal') {
+      if (g.orientation === 'horizontal' && g.value !== undefined) {
         gl.append('line')
           .attr('x1', tl.x - pad).attr('y1', g.value)
           .attr('x2', br.x + pad).attr('y2', g.value)
           .attr('stroke', color).attr('stroke-width', sw)
           .attr('stroke-dasharray', da).attr('opacity', 0.75)
           .attr('pointer-events', 'none');
-      } else {
+      } else if (g.orientation === 'vertical' && g.value !== undefined) {
         gl.append('line')
           .attr('x1', g.value).attr('y1', tl.y - pad)
           .attr('x2', g.value).attr('y2', br.y + pad)
+          .attr('stroke', color).attr('stroke-width', sw)
+          .attr('stroke-dasharray', da).attr('opacity', 0.75)
+          .attr('pointer-events', 'none');
+      } else if (g.orientation === 'along' && g.anchor && g.direction) {
+        // Arbitrary-angle guide: extend from anchor in both directions by `pad`
+        gl.append('line')
+          .attr('x1', g.anchor.x - g.direction.x * pad)
+          .attr('y1', g.anchor.y - g.direction.y * pad)
+          .attr('x2', g.anchor.x + g.direction.x * pad)
+          .attr('y2', g.anchor.y + g.direction.y * pad)
           .attr('stroke', color).attr('stroke-width', sw)
           .attr('stroke-dasharray', da).attr('opacity', 0.75)
           .attr('pointer-events', 'none');
@@ -878,10 +952,14 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         const newNodes: Node[] = [];
         const splits: { [nodeId: string]: string } = {};
 
-        // Apply axis snap to the endpoint when no node/edge snap is active.
+        // Apply axis / parallel snap to the endpoint when no node/edge snap is active.
         const kClick = d3.zoomTransform(svg as SVGSVGElement).k;
         const finalPoint = (!snapNode && !snapEdge)
-          ? (snapToAxis(startPoint, effectivePoint, kClick)?.point ?? effectivePoint)
+          ? (
+              snapToAxis(startPoint, effectivePoint, kClick)?.point ??
+              snapToParallel(startPoint, effectivePoint, wallFloorPlanEdgesRef.current, wallFloorPlanNodesRef.current, startNodeId ?? null, kClick)?.point ??
+              effectivePoint
+            )
           : effectivePoint;
 
         let sourceId: string;
@@ -962,7 +1040,20 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           endPoint = axisSnap.point;
           activeGuidelines.push(...axisSnap.guidelines);
         } else {
-          endPoint = dp;
+          // Parallel snap: only fires when no axis snap is active
+          const parallelSnap = snapToParallel(
+            startPoint, dp,
+            wallFloorPlanEdgesRef.current,
+            wallFloorPlanNodesRef.current,
+            wallDrawRef.current.startNodeId ?? null,
+            k,
+          );
+          if (parallelSnap) {
+            endPoint = parallelSnap.point;
+            activeGuidelines.push(...parallelSnap.guidelines);
+          } else {
+            endPoint = dp;
+          }
         }
       }
       renderGuidelines(activeGuidelines);
@@ -2004,11 +2095,59 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
               }
             }
           }
-          // Apply snapped or raw position to the datum
-          d.x = bestXSnap ? bestXSnap.value : rawX;
-          d.y = bestYSnap ? bestYSnap.value : rawY;
-          if (bestXSnap) dragGuidelines.push({ orientation: 'vertical',   value: bestXSnap.value });
-          if (bestYSnap) dragGuidelines.push({ orientation: 'horizontal', value: bestYSnap.value });
+          // Apply axis snap or, if no axis snap, parallel snap
+          if (bestXSnap || bestYSnap) {
+            d.x = bestXSnap ? bestXSnap.value : rawX;
+            d.y = bestYSnap ? bestYSnap.value : rawY;
+            if (bestXSnap) dragGuidelines.push({ orientation: 'vertical',   value: bestXSnap.value });
+            if (bestYSnap) dragGuidelines.push({ orientation: 'horizontal', value: bestYSnap.value });
+          } else {
+            // Parallel snap: for each connected edge, check if it's nearly parallel
+            // to any non-connected reference edge. Use the raw position so release
+            // is based on actual cursor distance from the direction line.
+            let bestParallelDev = AXIS_SNAP_PX;
+            let parallelPoint: Point | null = null;
+            let parallelGuideline: Guideline | null = null;
+            for (const edgeA of connectedEdges) {
+              const otherId = edgeA.source === d.id ? edgeA.target : edgeA.source;
+              const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
+              if (!other) continue;
+              const aDx = rawX - other.x;
+              const aDy = rawY - other.y;
+              if (Math.hypot(aDx, aDy) * kDrag < AXIS_SNAP_MIN_LEN_PX) continue;
+              const aLen = Math.hypot(aDx, aDy);
+              const aNx = aDx / aLen;
+              const aNy = aDy / aLen;
+              for (const edgeB of wallFloorPlanEdgesRef.current) {
+                if (edgeB.id === edgeA.id) continue;
+                if (edgeB.source === d.id || edgeB.target === d.id) continue;
+                const fromB = wallFloorPlanNodesRef.current.find(n => n.id === edgeB.source);
+                const toB   = wallFloorPlanNodesRef.current.find(n => n.id === edgeB.target);
+                if (!fromB || !toB) continue;
+                const bDx = toB.x - fromB.x;
+                const bDy = toB.y - fromB.y;
+                const bLen = Math.hypot(bDx, bDy);
+                if (bLen < 1e-6) continue;
+                const bDirX = bDx / bLen;
+                const bDirY = bDy / bLen;
+                if (Math.abs(aNx * bDirX + aNy * bDirY) < 0.5) continue; // not parallel
+                const perpPx = Math.abs(aDx * bDirY - aDy * bDirX) * kDrag;
+                if (perpPx >= bestParallelDev) continue;
+                bestParallelDev = perpPx;
+                const t = aDx * bDirX + aDy * bDirY;
+                parallelPoint = { x: other.x + t * bDirX, y: other.y + t * bDirY };
+                parallelGuideline = { orientation: 'along', anchor: other, direction: { x: bDirX, y: bDirY }, color: '#FF9800' };
+              }
+            }
+            if (parallelPoint) {
+              d.x = parallelPoint.x;
+              d.y = parallelPoint.y;
+              dragGuidelines.push(parallelGuideline!);
+            } else {
+              d.x = rawX;
+              d.y = rawY;
+            }
+          }
           renderGuidelines(dragGuidelines);
 
           // Update node position in DOM immediately for visual feedback
