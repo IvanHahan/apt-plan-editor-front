@@ -40,6 +40,19 @@ interface WallPolygon {
   polygon: Point[];
 }
 
+// ─── Guideline descriptors ────────────────────────────────────────────────────
+type GuidelineOrientation = 'horizontal' | 'vertical';
+
+interface Guideline {
+  /** 'horizontal' = constant-y guide, 'vertical' = constant-x guide (data-space) */
+  orientation: GuidelineOrientation;
+  /** Fixed coordinate value in data-space */
+  value: number;
+  color?: string;
+  label?: string;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function vecSub(a: Point, b: Point): Point {
   return { x: a.x - b.x, y: a.y - b.y };
 }
@@ -327,6 +340,57 @@ function computeWallPolygons(walls: Edge[], nodeMap: Map<string, Node>): WallPol
 }
 
 /**
+ * Screen-pixel perpendicular distance at which axis snap engages/releases.
+ * Because it's pixel-based (not angle-based) it feels consistent regardless
+ * of wall length or zoom level — you always need to move ~AXIS_SNAP_PX screen
+ * pixels away from the axis to break free.
+ */
+const AXIS_SNAP_PX = 8;
+/** Minimum wall length in screen pixels before axis snap activates. */
+const AXIS_SNAP_MIN_LEN_PX = 20;
+
+/**
+ * Snap `end` toward the horizontal or vertical axis through `start`.
+ *
+ * Uses screen-pixel perpendicular distance (requires zoom scale `k`) so
+ * engagement and release feel the same regardless of wall length or zoom.
+ * The primary axis (H vs V) is chosen by whichever component is dominant.
+ *
+ * Returns the snapped point + Guideline descriptor(s), or null when the
+ * perpendicular deviation exceeds `snapPx` or the wall is too short.
+ */
+function snapToAxis(
+  start: Point,
+  end: Point,
+  k: number,
+  snapPx = AXIS_SNAP_PX,
+  minLenPx = AXIS_SNAP_MIN_LEN_PX,
+): { point: Point; guidelines: Guideline[] } | null {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lenPx = Math.hypot(dx, dy) * k;
+  if (lenPx < minLenPx) return null;
+  if (Math.abs(dy) <= Math.abs(dx)) {
+    // Primarily horizontal — perpendicular deviation is vertical
+    if (Math.abs(dy) * k < snapPx) {
+      return {
+        point: { x: end.x, y: start.y },
+        guidelines: [{ orientation: 'horizontal', value: start.y }],
+      };
+    }
+  } else {
+    // Primarily vertical — perpendicular deviation is horizontal
+    if (Math.abs(dx) * k < snapPx) {
+      return {
+        point: { x: start.x, y: end.y },
+        guidelines: [{ orientation: 'vertical', value: start.x }],
+      };
+    }
+  }
+  return null;
+}
+
+/**
  * Create simple rectangle polygon (for doors/windows)
  */
 function createRectPolygon(p1: Point, p2: Point, thickness: number): Point[] {
@@ -378,6 +442,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const measureGRef = useRef<SVGGElement>(null);
   const wallPreviewGRef = useRef<SVGGElement | null>(null);
   const dragGhostGRef = useRef<SVGGElement | null>(null);
+  const guidelineGRef = useRef<SVGGElement | null>(null);
 
   // Wall drawing state — kept in refs to avoid re-renders on every mouse move
   const wallDrawRef = useRef<{ startPoint: Point; startNodeId?: string; startSplitEdgeId?: string } | null>(null);
@@ -601,6 +666,58 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     }
   }, [floorPlan.nodes]);
 
+  // ─── Shared guideline rendering helpers ──────────────────────────────────────────────────
+  //
+  // Each caller builds an array of Guideline descriptors and calls
+  // renderGuidelines(descriptors).  Future guideline sources (parallel walls,
+  // extension lines, …) just push more items into the array — zero changes here.
+  const renderGuidelines = (guidelines: Guideline[]) => {
+    if (!guidelineGRef.current || !svgRef.current || !gRef.current) return;
+    const gl = d3.select(guidelineGRef.current);
+    gl.selectAll('*').remove();
+    if (guidelines.length === 0) return;
+    const svgEl = svgRef.current as SVGSVGElement;
+    const gEl = gRef.current;
+    const k = d3.zoomTransform(svgEl).k;
+    // Compute viewport corners in data-space so lines always span the visible area.
+    const toData = (cx: number, cy: number) => {
+      const p = svgEl.createSVGPoint();
+      p.x = cx; p.y = cy;
+      const ctm = gEl.getScreenCTM();
+      if (!ctm) return { x: 0, y: 0 };
+      const tp = p.matrixTransform(ctm.inverse());
+      return { x: tp.x, y: tp.y };
+    };
+    const rect = svgEl.getBoundingClientRect();
+    const tl = toData(rect.left, rect.top);
+    const br = toData(rect.right, rect.bottom);
+    const pad = 9999; // extra padding to cover panning during draw
+    for (const g of guidelines) {
+      const color = g.color ?? '#4CAF50';
+      const sw = 1 / k;
+      const da = `${8 / k},${4 / k}`;
+      if (g.orientation === 'horizontal') {
+        gl.append('line')
+          .attr('x1', tl.x - pad).attr('y1', g.value)
+          .attr('x2', br.x + pad).attr('y2', g.value)
+          .attr('stroke', color).attr('stroke-width', sw)
+          .attr('stroke-dasharray', da).attr('opacity', 0.75)
+          .attr('pointer-events', 'none');
+      } else {
+        gl.append('line')
+          .attr('x1', g.value).attr('y1', tl.y - pad)
+          .attr('x2', g.value).attr('y2', br.y + pad)
+          .attr('stroke', color).attr('stroke-width', sw)
+          .attr('stroke-dasharray', da).attr('opacity', 0.75)
+          .attr('pointer-events', 'none');
+      }
+    }
+  };
+  const clearGuidelines = () => {
+    if (guidelineGRef.current) d3.select(guidelineGRef.current).selectAll('*').remove();
+  };
+  // ─────────────────────────────────────────────────────────────────────────────
+
   // ============================================
   // Wall Drawing Tool interaction
   // ============================================
@@ -611,6 +728,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       if (wallPreviewGRef.current) {
         d3.select(wallPreviewGRef.current).selectAll('*').remove();
       }
+      clearGuidelines();
       // Clear any lingering snap highlight
       if (wallSnapNodeRef.current && drawGRef.current) {
         d3.select(drawGRef.current)
@@ -760,6 +878,12 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         const newNodes: Node[] = [];
         const splits: { [nodeId: string]: string } = {};
 
+        // Apply axis snap to the endpoint when no node/edge snap is active.
+        const kClick = d3.zoomTransform(svg as SVGSVGElement).k;
+        const finalPoint = (!snapNode && !snapEdge)
+          ? (snapToAxis(startPoint, effectivePoint, kClick)?.point ?? effectivePoint)
+          : effectivePoint;
+
         let sourceId: string;
         if (startNodeId) {
           sourceId = startNodeId;
@@ -774,7 +898,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           targetId = snapNode.id;
         } else {
           targetId = crypto.randomUUID();
-          newNodes.push({ id: targetId, x: effectivePoint.x, y: effectivePoint.y });
+          newNodes.push({ id: targetId, x: finalPoint.x, y: finalPoint.y });
           if (snapEdge) splits[targetId] = snapEdge.edge.id;
         }
 
@@ -798,11 +922,12 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         // Auto-continue: immediately start next wall from the end of this one.
         // The user can break the chain by pressing Escape.
         wallDrawRef.current = {
-          startPoint: effectivePoint,
+          startPoint: finalPoint,
           startNodeId: targetId,
           startSplitEdgeId: undefined,
         };
         if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
+        clearGuidelines();
         updateSnapHighlight(null);
         updateEdgeSnapHighlight(null);
       }
@@ -821,12 +946,26 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
       const { startPoint } = wallDrawRef.current;
       const dp = toDataPoint(event.clientX, event.clientY);
-      const endPoint = snapNode
-        ? { x: snapNode.x, y: snapNode.y }
-        : snapEdge
-        ? snapEdge.point
-        : dp;
       const k = d3.zoomTransform(svg as SVGSVGElement).k;
+
+      // Axis snap: when no node/edge snap active, snap near-H/V walls to exact axis.
+      // Build a guidelines array so any caller can extend it (e.g. parallel walls).
+      const activeGuidelines: Guideline[] = [];
+      let endPoint: Point;
+      if (snapNode) {
+        endPoint = { x: snapNode.x, y: snapNode.y };
+      } else if (snapEdge) {
+        endPoint = snapEdge.point;
+      } else {
+        const axisSnap = snapToAxis(startPoint, dp, k);
+        if (axisSnap) {
+          endPoint = axisSnap.point;
+          activeGuidelines.push(...axisSnap.guidelines);
+        } else {
+          endPoint = dp;
+        }
+      }
+      renderGuidelines(activeGuidelines);
       const thick = wallThicknessRef.current;
 
       const pg = d3.select(wallPreviewGRef.current);
@@ -872,6 +1011,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       if (event.key === 'Escape' && wallDrawRef.current) {
         wallDrawRef.current = null;
         if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
+        clearGuidelines();
         updateSnapHighlight(null);
         updateEdgeSnapHighlight(null);
       }
@@ -1817,11 +1957,60 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .attr('fill', '#0066cc');
         })
         .on('drag', function(event, d) {
-          // event.dx and event.dy are the drag deltas in the parent's coordinate system
-          // Since nodes are inside drawG (which is in data space), we just add the deltas
-          d.x += event.dx;
-          d.y += event.dy;
-          
+          // --- Raw position tracking -----------------------------------------
+          // We accumulate raw (unsnapped) deltas separately so snap release is
+          // based on true cursor distance from the axis, not the snapped d.x/d.y.
+          // Without this, d.x/d.y stays at the snapped value each frame, the
+          // perpendicular deviation is always near-zero, and snap never releases.
+          if ((this as any).__rawX === undefined) {
+            (this as any).__rawX = d.x;
+            (this as any).__rawY = d.y;
+          }
+          (this as any).__rawX += event.dx;
+          (this as any).__rawY += event.dy;
+          const rawX: number = (this as any).__rawX;
+          const rawY: number = (this as any).__rawY;
+
+          // Axis snap: evaluate each connected wall independently for X and Y.
+          // Compare RAW position against the axis — so release fires as soon as
+          // the cursor (not the snapped node) exceeds AXIS_SNAP_PX from the axis.
+          const kDrag = d3.zoomTransform(svgRef.current as SVGSVGElement).k;
+          const connectedEdges = wallFloorPlanEdgesRef.current.filter(
+            e => e.source === d.id || e.target === d.id,
+          );
+          const dragGuidelines: Guideline[] = [];
+          let bestXSnap: { value: number; dev: number } | null = null;
+          let bestYSnap: { value: number; dev: number } | null = null;
+          for (const edge of connectedEdges) {
+            const otherId = edge.source === d.id ? edge.target : edge.source;
+            const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
+            if (!other) continue;
+            const eDx = rawX - other.x;
+            const eDy = rawY - other.y;
+            const eLenPx = Math.hypot(eDx, eDy) * kDrag;
+            if (eLenPx < AXIS_SNAP_MIN_LEN_PX) continue;
+            // Primarily vertical wall → snap X (perpendicular deviation = |eDx|)
+            if (Math.abs(eDy) > Math.abs(eDx)) {
+              const devPx = Math.abs(eDx) * kDrag;
+              if (devPx < AXIS_SNAP_PX && (!bestXSnap || devPx < bestXSnap.dev)) {
+                bestXSnap = { value: other.x, dev: devPx };
+              }
+            }
+            // Primarily horizontal wall → snap Y (perpendicular deviation = |eDy|)
+            if (Math.abs(eDx) > Math.abs(eDy)) {
+              const devPx = Math.abs(eDy) * kDrag;
+              if (devPx < AXIS_SNAP_PX && (!bestYSnap || devPx < bestYSnap.dev)) {
+                bestYSnap = { value: other.y, dev: devPx };
+              }
+            }
+          }
+          // Apply snapped or raw position to the datum
+          d.x = bestXSnap ? bestXSnap.value : rawX;
+          d.y = bestYSnap ? bestYSnap.value : rawY;
+          if (bestXSnap) dragGuidelines.push({ orientation: 'vertical',   value: bestXSnap.value });
+          if (bestYSnap) dragGuidelines.push({ orientation: 'horizontal', value: bestYSnap.value });
+          renderGuidelines(dragGuidelines);
+
           // Update node position in DOM immediately for visual feedback
           d3.select(this).attr('transform', `translate(${d.x},${d.y})`);
 
@@ -1833,8 +2022,12 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           setDraggedNodeId(null);
           d3.select(this).select('.node-point')
             .attr('fill', '#FF6B6B');
+          // Clean up raw position tracking
+          delete (this as any).__rawX;
+          delete (this as any).__rawY;
           clearDragGhosts();
-          
+          clearGuidelines();
+
           // Notify parent of node position change
           onNodePositionsChange([{ id: d.id, x: d.x, y: d.y }]);
         });
@@ -1955,6 +2148,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         <g ref={gRef}>
           <g ref={drawGRef} />
           <g ref={dragGhostGRef} />
+          <g ref={guidelineGRef} />
           <g ref={wallPreviewGRef} />
           <g ref={measureGRef} />
           {selectionBox && (
