@@ -305,10 +305,22 @@ function computeWallPolygons(walls: Edge[], nodeMap: Map<string, Node>): WallPol
     const tgtCorners = computeJunctionCorners(wall.target, tgtPos, wall, tgtAdj, nodeMap, half);
     
     // Note: target corners are computed with reversed direction, so swap left/right
-    result.push({
-      edge: wall,
-      polygon: [srcCorners.left, tgtCorners.right, tgtCorners.left, srcCorners.right]
-    });
+    let polygon: Point[] = [srcCorners.left, tgtCorners.right, tgtCorners.left, srcCorners.right];
+
+    // Apply lateral shift: offset all polygon points perpendicularly to the wall axis
+    const wallShift = wall.shift ?? 0;
+    if (wallShift !== 0) {
+      const dx = tgtPos.x - srcPos.x;
+      const dy = tgtPos.y - srcPos.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0) {
+        const perpX = (-dy / len) * wallShift;
+        const perpY = (dx / len) * wallShift;
+        polygon = polygon.map(pt => ({ x: pt.x + perpX, y: pt.y + perpY }));
+      }
+    }
+
+    result.push({ edge: wall, polygon });
   }
   
   return result;

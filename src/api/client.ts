@@ -24,6 +24,7 @@ export interface ApiEdge {
   edge_type: string;
   is_inner: boolean;
   thickness: number;
+  shift?: number | null;
   properties: Record<string, any>;
   geometries?: ApiEdgeGeometry[];
 }
@@ -291,6 +292,36 @@ export async function deleteEdges(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Failed to delete edges' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Edge property update payload
+ */
+export interface EdgePropertyUpdate {
+  id: string;
+  thickness?: number;
+  shift?: number;
+}
+
+/**
+ * Update edge properties (thickness, shift) for one or more edges
+ */
+export async function updateEdges(
+  planId: string,
+  edges: EdgePropertyUpdate[]
+): Promise<FloorPlanDetail> {
+  const response = await fetch(`${API_BASE_URL}/floor-plans/${planId}/edges`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ edges }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to update edges' }));
     throw new Error(error.detail || `HTTP ${response.status}`);
   }
 

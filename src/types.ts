@@ -29,6 +29,7 @@ export interface Edge {
   target: string; // Node ID
   type: EdgeType;
   thickness?: number;
+  shift?: number;   // Lateral offset perpendicular to wall direction
   is_inner?: boolean;
   properties?: Record<string, any>;
   geometries?: EdgeGeometry[];

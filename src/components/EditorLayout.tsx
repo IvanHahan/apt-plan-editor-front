@@ -4,7 +4,7 @@ import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { ToolsBar } from './ToolsBar';
 import { WallToolOptions } from './WallToolOptions';
 import { AssetToolOptions } from './AssetToolOptions';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, createEmptyFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, deleteEdges, mergeEdges, updateFloorPlan, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, createEmptyFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, deleteEdges, mergeEdges, updateEdges, updateFloorPlan, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData, type EdgePropertyUpdate } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
 import type { FloorPlan, Node, Edge, EditorTool, AssetType, AssetPlacement } from '../types';
 import './EditorLayout.css';
@@ -569,6 +569,47 @@ export const EditorLayout: React.FC = () => {
     }
   };
 
+  const handleEdgePropertyUpdate = async (delta: { thickness?: number; shift?: number }) => {
+    if (!currentPlanId || selectedEdgeIds.size === 0) return;
+
+    const selectedEdges = floorPlan.edges.filter(e => selectedEdgeIds.has(e.id));
+    if (selectedEdges.length === 0) return;
+
+    const updates: EdgePropertyUpdate[] = selectedEdges.map(edge => ({
+      id: edge.id,
+      ...(delta.thickness !== undefined
+        ? { thickness: Math.max(1, (edge.thickness ?? 16) + delta.thickness) }
+        : {}),
+      ...(delta.shift !== undefined
+        ? { shift: (edge.shift ?? 0) + delta.shift }
+        : {}),
+    }));
+
+    // Optimistic update
+    setFloorPlan(prev => ({
+      ...prev,
+      edges: prev.edges.map(edge => {
+        const update = updates.find(u => u.id === edge.id);
+        if (!update) return edge;
+        return {
+          ...edge,
+          ...(update.thickness !== undefined ? { thickness: update.thickness } : {}),
+          ...(update.shift !== undefined ? { shift: update.shift } : {}),
+        };
+      }),
+    }));
+
+    try {
+      const updatedPlan = await updateEdges(currentPlanId, updates);
+      const convertedPlan = convertApiToFloorPlan(updatedPlan);
+      setFloorPlan(convertedPlan);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to update edges:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update edges');
+    }
+  };
+
   const handleAssetPlace = async (placement: AssetPlacement) => {
     const { wallEdge, wallSourceNode, wallTargetNode, assetStartPt, assetEndPt } = placement;
 
@@ -902,76 +943,125 @@ export const EditorLayout: React.FC = () => {
             )}
 
             {/* Edge Selection Controls */}
-            {selectedEdgeIds.size > 0 && isEditMode && !isRedesignMode && !isMeasureMode && (
-              <div style={{
-                position: 'absolute',
-                top: '20px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                backgroundColor: '#fff',
-                border: '2px solid #2196F3',
-                borderRadius: '8px',
-                padding: '12px 20px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            {selectedEdgeIds.size > 0 && isEditMode && !isRedesignMode && !isMeasureMode && (() => {
+              const selectedEdges = floorPlan.edges.filter(e => selectedEdgeIds.has(e.id));
+              const thicknessValues = [...new Set(selectedEdges.map(e => e.thickness ?? 16))];
+              const shiftValues = [...new Set(selectedEdges.map(e => e.shift ?? 0))];
+              const thicknessDisplay = thicknessValues.length === 1 ? thicknessValues[0].toString() : '–';
+              const shiftDisplay = shiftValues.length === 1 ? shiftValues[0].toString() : '–';
+              const stepperBtn: React.CSSProperties = {
+                backgroundColor: '#e3f2fd',
+                color: '#1565c0',
+                border: '1px solid #90caf9',
+                borderRadius: '4px',
+                width: '24px',
+                height: '24px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                lineHeight: '1',
+                padding: 0,
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
-                zIndex: 1000
-              }}>
-                <span style={{ fontWeight: 'bold', color: '#2196F3' }}>
-                  {selectedEdgeIds.size} edge{selectedEdgeIds.size > 1 ? 's' : ''} selected
-                </span>
-                <button
-                  onClick={handleDeleteSelected}
-                  style={{
-                    backgroundColor: '#f44336',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    padding: '6px 16px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '14px'
-                  }}
-                  title="Delete selected edges (Delete key)"
-                >
-                  🗑️ Delete
-                </button>
-                <button
-                  onClick={handleMergeSelected}
-                  disabled={selectedEdgeIds.size < 2}
-                  style={{
-                    backgroundColor: selectedEdgeIds.size < 2 ? '#ccc' : '#2196F3',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '4px',
-                    padding: '6px 16px',
-                    cursor: selectedEdgeIds.size < 2 ? 'not-allowed' : 'pointer',
-                    fontWeight: 'bold',
-                    fontSize: '14px',
-                    opacity: selectedEdgeIds.size < 2 ? 0.6 : 1
-                  }}
-                  title={selectedEdgeIds.size < 2 ? 'Select at least 2 edges to merge' : 'Merge selected edges into one'}
-                >
-                  🔗 Merge
-                </button>
-                <button
-                  onClick={handleClearSelection}
-                  style={{
-                    backgroundColor: '#fff',
-                    color: '#666',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px',
-                    padding: '6px 16px',
-                    cursor: 'pointer',
-                    fontSize: '14px'
-                  }}
-                  title="Clear selection (Esc)"
-                >
-                  ✕ Clear
-                </button>
-              </div>
-            )}
+                justifyContent: 'center',
+              };
+              return (
+                <div style={{
+                  position: 'absolute',
+                  top: '20px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: '#fff',
+                  border: '2px solid #2196F3',
+                  borderRadius: '8px',
+                  padding: '12px 20px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: '10px',
+                  zIndex: 1000
+                }}>
+                  {/* Row 1: selection label + action buttons */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontWeight: 'bold', color: '#2196F3' }}>
+                      {selectedEdgeIds.size} edge{selectedEdgeIds.size > 1 ? 's' : ''} selected
+                    </span>
+                    <button
+                      onClick={handleDeleteSelected}
+                      style={{
+                        backgroundColor: '#f44336',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        padding: '6px 16px',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        fontSize: '14px'
+                      }}
+                      title="Delete selected edges (Delete key)"
+                    >
+                      🗑️ Delete
+                    </button>
+                    <button
+                      onClick={handleMergeSelected}
+                      disabled={selectedEdgeIds.size < 2}
+                      style={{
+                        backgroundColor: selectedEdgeIds.size < 2 ? '#ccc' : '#2196F3',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        padding: '6px 16px',
+                        cursor: selectedEdgeIds.size < 2 ? 'not-allowed' : 'pointer',
+                        fontWeight: 'bold',
+                        fontSize: '14px',
+                        opacity: selectedEdgeIds.size < 2 ? 0.6 : 1
+                      }}
+                      title={selectedEdgeIds.size < 2 ? 'Select at least 2 edges to merge' : 'Merge selected edges into one'}
+                    >
+                      🔗 Merge
+                    </button>
+                    <button
+                      onClick={handleClearSelection}
+                      style={{
+                        backgroundColor: '#fff',
+                        color: '#666',
+                        border: '1px solid #ddd',
+                        borderRadius: '4px',
+                        padding: '6px 16px',
+                        cursor: 'pointer',
+                        fontSize: '14px'
+                      }}
+                      title="Clear selection (Esc)"
+                    >
+                      ✕ Clear
+                    </button>
+                  </div>
+                  {/* Row 2: thickness + shift steppers */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '20px',
+                    borderTop: '1px solid #e3f2fd',
+                    paddingTop: '8px',
+                    width: '100%',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '13px', color: '#555', fontWeight: 500 }}>Thickness:</span>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ thickness: -1 })} title="Decrease thickness">▼</button>
+                      <span style={{ minWidth: '30px', textAlign: 'center', fontSize: '13px', fontWeight: 'bold', color: '#1565c0' }}>{thicknessDisplay}</span>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ thickness: 1 })} title="Increase thickness">▲</button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '13px', color: '#555', fontWeight: 500 }}>Shift:</span>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ shift: -1 })} title="Shift wall left/down">▼</button>
+                      <span style={{ minWidth: '30px', textAlign: 'center', fontSize: '13px', fontWeight: 'bold', color: '#1565c0' }}>{shiftDisplay}</span>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ shift: 1 })} title="Shift wall right/up">▲</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             <FloorPlanCanvas
               floorPlan={floorPlan}
