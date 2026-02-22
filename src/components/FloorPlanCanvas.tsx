@@ -568,6 +568,27 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   }, [measureMode]);
 
   // ============================================
+  // Remap wallDrawRef.startNodeId when server replaces floor plan node IDs
+  // ============================================
+  useEffect(() => {
+    if (!wallDrawRef.current?.startNodeId) return;
+    const nodeId = wallDrawRef.current.startNodeId;
+    // If the node still exists in the updated plan, nothing to do
+    if (floorPlan.nodes.some(n => n.id === nodeId)) return;
+    // Server replaced node IDs — find the nearest node to startPoint
+    const sp = wallDrawRef.current.startPoint;
+    let best: Node | null = null;
+    let bestDist = Infinity;
+    for (const n of floorPlan.nodes) {
+      const dist = Math.hypot(n.x - sp.x, n.y - sp.y);
+      if (dist < bestDist) { bestDist = dist; best = n; }
+    }
+    if (best) {
+      wallDrawRef.current = { ...wallDrawRef.current, startNodeId: best.id, startPoint: { x: best.x, y: best.y } };
+    }
+  }, [floorPlan.nodes]);
+
+  // ============================================
   // Wall Drawing Tool interaction
   // ============================================
   useEffect(() => {
@@ -761,8 +782,13 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
         onWallAddRef.current?.(newEdge, newNodes, Object.keys(splits).length > 0 ? splits : undefined);
 
-        // Reset drawing state
-        wallDrawRef.current = null;
+        // Auto-continue: immediately start next wall from the end of this one.
+        // The user can break the chain by pressing Escape.
+        wallDrawRef.current = {
+          startPoint: effectivePoint,
+          startNodeId: targetId,
+          startSplitEdgeId: undefined,
+        };
         if (wallPreviewGRef.current) d3.select(wallPreviewGRef.current).selectAll('*').remove();
         updateSnapHighlight(null);
         updateEdgeSnapHighlight(null);

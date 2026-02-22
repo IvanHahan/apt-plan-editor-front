@@ -35,6 +35,9 @@ export const EditorLayout: React.FC = () => {
   // Pending wall creations awaiting debounced persist
   const wallSaveTimerRef = useRef<number | null>(null);
   const pendingWallsRef = useRef<NewEdgeData[]>([]);
+  // Accumulates nodes created optimistically so chained wall calls resolve source nodes
+  // even when the React state hasn't re-rendered yet.
+  const accumulatedNewNodesRef = useRef<Node[]>([]);
   
   // Redesign mode state
   const [isRedesignMode, setIsRedesignMode] = useState(false);
@@ -66,22 +69,32 @@ export const EditorLayout: React.FC = () => {
   const [assetWidthCm, setAssetWidthCm] = useState(80);
 
   const handleWallAdd = (newEdge: Edge, newNodes: Node[], splits?: { [nodeId: string]: string }) => {
-    // Optimistic local update
+    // Resolve node coordinates first — before any state mutation.
+    // accumulatedNewNodesRef holds nodes added in previous chained calls that may not
+    // yet be reflected in the floorPlan state (React hasn't re-rendered).
+    // Deduplicate: prefer the latest occurrence of any given id.
+    const nodeMap = new Map<string, Node>();
+    for (const n of floorPlan.nodes) nodeMap.set(n.id, n);
+    for (const n of accumulatedNewNodesRef.current) nodeMap.set(n.id, n);
+    for (const n of newNodes) nodeMap.set(n.id, n);
+    const fromNode = nodeMap.get(newEdge.source);
+    const toNode = nodeMap.get(newEdge.target);
+    if (!fromNode || !toNode) {
+      console.error('handleWallAdd: could not resolve node coordinates', { source: newEdge.source, target: newEdge.target, nodeIds: [...nodeMap.keys()] });
+      return;
+    }
+
+    // Persist new nodes into the accumulator for subsequent chained calls
+    for (const n of newNodes) {
+      accumulatedNewNodesRef.current = [...accumulatedNewNodesRef.current.filter(x => x.id !== n.id), n];
+    }
+
+    // Optimistic local update — only after resolution succeeds to avoid orphaned edges
     setFloorPlan((prev) => ({
       ...prev,
       nodes: [...prev.nodes, ...newNodes],
       edges: [...prev.edges, newEdge],
     }));
-
-    // Resolve node coordinates immediately (avoid stale closure later).
-    // newNodes contains freshly created nodes; existing nodes come from floorPlan.nodes.
-    const allNodes = [...floorPlan.nodes, ...newNodes];
-    const fromNode = allNodes.find(n => n.id === newEdge.source);
-    const toNode = allNodes.find(n => n.id === newEdge.target);
-    if (!fromNode || !toNode) {
-      console.error('handleWallAdd: could not resolve node coordinates');
-      return;
-    }
 
     pendingWallsRef.current.push({
       from_node: {
@@ -127,6 +140,8 @@ export const EditorLayout: React.FC = () => {
         const result = await createEdges(planId, batch);
         const convertedPlan = convertApiToFloorPlan(result);
         setFloorPlan(convertedPlan);
+        // Backend response is ground truth — clear the optimistic accumulator
+        accumulatedNewNodesRef.current = [];
         setHasUnsavedChanges(false);
       } catch (err) {
         console.error('Failed to save new walls:', err);
