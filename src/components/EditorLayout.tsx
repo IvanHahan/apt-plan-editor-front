@@ -3,9 +3,10 @@ import { FloorPlanCanvas } from './FloorPlanCanvas';
 import { GeneratedImagePreview } from './GeneratedImagePreview';
 import { ToolsBar } from './ToolsBar';
 import { WallToolOptions } from './WallToolOptions';
-import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, createEmptyFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, updateFloorPlan, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
+import { AssetToolOptions } from './AssetToolOptions';
+import { processFloorPlanImage, listUserFloorPlans, deleteFloorPlan, createEmptyFloorPlan, redesignFloorPlan, normalizeScale, getFloorPlan, updateFloorPlanNodes, createEdges, deleteEdges, mergeEdges, updateFloorPlan, type FloorPlanSummary, type NodePositionUpdate, type NewEdgeData } from '../api/client';
 import { convertApiToFloorPlan } from '../utils/converter';
-import type { FloorPlan, Node, Edge, EditorTool } from '../types';
+import type { FloorPlan, Node, Edge, EditorTool, AssetType, AssetPlacement } from '../types';
 import './EditorLayout.css';
 
 // Get user ID from env (in production, get from auth)
@@ -59,6 +60,10 @@ export const EditorLayout: React.FC = () => {
 
   // Wall tool state
   const [wallThickness, setWallThickness] = useState(16); // 20 cm at unit_scale=80
+
+  // Asset tool state
+  const [assetType, setAssetType] = useState<AssetType>('door');
+  const [assetWidthCm, setAssetWidthCm] = useState(80);
 
   const handleWallAdd = (newEdge: Edge, newNodes: Node[], splits?: { [nodeId: string]: string }) => {
     // Optimistic local update
@@ -523,7 +528,6 @@ export const EditorLayout: React.FC = () => {
     if (selectedEdgeIds.size === 0 || !currentPlanId) return;
 
     try {
-      const { deleteEdges } = await import('../api/client');
       const updatedPlan = await deleteEdges(currentPlanId, Array.from(selectedEdgeIds));
       const convertedPlan = convertApiToFloorPlan(updatedPlan);
       setFloorPlan(convertedPlan);
@@ -539,7 +543,6 @@ export const EditorLayout: React.FC = () => {
     if (selectedEdgeIds.size < 2 || !currentPlanId) return;
 
     try {
-      const { mergeEdges } = await import('../api/client');
       const updatedPlan = await mergeEdges(currentPlanId, Array.from(selectedEdgeIds));
       const convertedPlan = convertApiToFloorPlan(updatedPlan);
       setFloorPlan(convertedPlan);
@@ -551,11 +554,86 @@ export const EditorLayout: React.FC = () => {
     }
   };
 
+  const handleAssetPlace = async (placement: AssetPlacement) => {
+    const { wallEdge, wallSourceNode, wallTargetNode, assetStartPt, assetEndPt } = placement;
+
+    const assetStartId = crypto.randomUUID();
+    const assetEndId = crypto.randomUUID();
+    const assetStartNode: Node = { id: assetStartId, x: assetStartPt.x, y: assetStartPt.y };
+    const assetEndNode: Node = { id: assetEndId, x: assetEndPt.x, y: assetEndPt.y };
+
+    const MIN_SEG = 1; // data units — skip degenerate wall stubs
+    const dx1 = assetStartPt.x - wallSourceNode.x;
+    const dy1 = assetStartPt.y - wallSourceNode.y;
+    const dx2 = wallTargetNode.x - assetEndPt.x;
+    const dy2 = wallTargetNode.y - assetEndPt.y;
+    const seg1Len = Math.hypot(dx1, dy1);
+    const seg2Len = Math.hypot(dx2, dy2);
+
+    const newEdgesData: NewEdgeData[] = [];
+    if (seg1Len >= MIN_SEG) {
+      newEdgesData.push({
+        from_node: { id: wallSourceNode.id, x: wallSourceNode.x, y: wallSourceNode.y },
+        to_node: { id: assetStartId, x: assetStartPt.x, y: assetStartPt.y },
+        edge_type: 'wall',
+        thickness: wallEdge.thickness,
+        is_inner: wallEdge.is_inner ?? true,
+      });
+    }
+    newEdgesData.push({
+      from_node: { id: assetStartId, x: assetStartPt.x, y: assetStartPt.y },
+      to_node: { id: assetEndId, x: assetEndPt.x, y: assetEndPt.y },
+      edge_type: assetType,
+      thickness: wallEdge.thickness,
+      is_inner: wallEdge.is_inner ?? true,
+    });
+    if (seg2Len >= MIN_SEG) {
+      newEdgesData.push({
+        from_node: { id: assetEndId, x: assetEndPt.x, y: assetEndPt.y },
+        to_node: { id: wallTargetNode.id, x: wallTargetNode.x, y: wallTargetNode.y },
+        edge_type: 'wall',
+        thickness: wallEdge.thickness,
+        is_inner: wallEdge.is_inner ?? true,
+      });
+    }
+
+    // Optimistic update
+    setFloorPlan((prev) => ({
+      ...prev,
+      nodes: [...prev.nodes, assetStartNode, assetEndNode],
+      edges: prev.edges.filter((e) => e.id !== wallEdge.id).concat(
+        newEdgesData.map((ed, i) => ({
+          id: `optimistic-asset-${i}-${Date.now()}`,
+          source: ed.from_node.id,
+          target: ed.to_node.id,
+          type: ed.edge_type as Edge['type'],
+          thickness: ed.thickness,
+          is_inner: ed.is_inner,
+        } as Edge))
+      ),
+    }));
+
+    if (!currentPlanId) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await deleteEdges(currentPlanId, [wallEdge.id]);
+      const result = await createEdges(currentPlanId, newEdgesData);
+      const convertedPlan = convertApiToFloorPlan(result);
+      setFloorPlan(convertedPlan);
+      setHasUnsavedChanges(false);
+    } catch (err) {
+      console.error('Failed to place asset:', err);
+      setError(err instanceof Error ? err.message : 'Failed to place asset');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleEdgeDelete = async (edgeId: string) => {
     if (!currentPlanId) return;
 
     try {
-      const { deleteEdges } = await import('../api/client');
       const updatedPlan = await deleteEdges(currentPlanId, [edgeId]);
       const convertedPlan = convertApiToFloorPlan(updatedPlan);
       setFloorPlan(convertedPlan);
@@ -727,6 +805,15 @@ export const EditorLayout: React.FC = () => {
               unitScale={floorPlan.unit_scale ?? 80}
             />
           )}
+          {activeTool === 'assets' && (
+            <AssetToolOptions
+              assetType={assetType}
+              widthCm={assetWidthCm}
+              onAssetTypeChange={setAssetType}
+              onWidthChange={setAssetWidthCm}
+              unitScale={floorPlan.unit_scale ?? 80}
+            />
+          )}
           
           <div id="canvas-container" style={{ 
             position: 'relative',
@@ -871,6 +958,9 @@ export const EditorLayout: React.FC = () => {
               activeTool={activeTool}
               wallThickness={wallThickness}
               onWallAdd={handleWallAdd}
+              assetType={assetType}
+              assetWidthCm={assetWidthCm}
+              onAssetPlace={handleAssetPlace}
               onEdgeClick={() => {}}
               onRoomClick={isRedesignMode ? handleToggleRoomLock : undefined}
               measureMode={isMeasureMode}

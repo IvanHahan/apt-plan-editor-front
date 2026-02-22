@@ -1,0 +1,135 @@
+.asset-tool-options {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background-color: #fff8e1;
+  border-bottom: 1px solid #ffe082;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  min-height: fit-content;
+}
+
+/* Type tabs */
+.asset-type-tabs {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.asset-type-tab {
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid #ffd54f;
+  border-radius: 4px;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.asset-type-tab:hover {
+  background: #fff9c4;
+  color: #333;
+}
+
+.asset-type-tab.active {
+  background: #f9a825;
+  color: #fff;
+  border-color: #f57f17;
+  font-weight: 600;
+}
+
+/* Label */
+.asset-tool-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e65100;
+  white-space: nowrap;
+}
+
+/* Preset chips */
+.asset-preset-chips {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.asset-preset-chip {
+  padding: 3px 9px;
+  font-size: 12px;
+  border: 1px solid #ffd54f;
+  border-radius: 12px;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.asset-preset-chip:hover {
+  background: #fff9c4;
+  color: #333;
+}
+
+.asset-preset-chip.active {
+  background: #ffa000;
+  color: #fff;
+  border-color: #ff6f00;
+  font-weight: 600;
+}
+
+/* Custom input group */
+.asset-custom-input-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.asset-custom-label {
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.asset-custom-input {
+  width: 56px;
+  font-size: 13px;
+  padding: 3px 6px;
+  border: 1px solid #ffd54f;
+  border-radius: 4px;
+  color: #333;
+  outline: none;
+  text-align: center;
+}
+
+.asset-custom-input:focus {
+  border-color: #ffa000;
+  box-shadow: 0 0 0 2px rgba(255, 160, 0, 0.2);
+}
+
+.asset-custom-unit {
+  font-size: 12px;
+  color: #888;
+}
+
+/* Width readout */
+.asset-width-readout {
+  font-size: 13px;
+  color: #e65100;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 46px;
+}
+
+/* Hint text */
+.asset-hint {
+  font-size: 11px;
+  color: #aaa;
+  white-space: nowrap;
+  margin-left: auto;
+  font-style: italic;
+}

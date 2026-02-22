@@ -68,7 +68,23 @@ export interface FloorPlan {
 /**
  * Available editor tools
  */
-export type EditorTool = 'cursor' | 'selection' | 'wall';
+export type EditorTool = 'cursor' | 'selection' | 'wall' | 'assets';
+
+/**
+ * Asset type for the assets tool
+ */
+export type AssetType = 'door' | 'window';
+
+/**
+ * Describes a resolved snap position for placing an asset onto a wall
+ */
+export interface AssetPlacement {
+  wallEdge: Edge;
+  wallSourceNode: Node;
+  wallTargetNode: Node;
+  assetStartPt: { x: number; y: number };
+  assetEndPt: { x: number; y: number };
+}
 
 /**
  * Props for WallToolOptions panel
@@ -77,6 +93,17 @@ export interface WallToolOptionsProps {
   thickness: number;          // in data-space units
   onThicknessChange: (v: number) => void;
   unitScale: number;          // data-units per metre
+}
+
+/**
+ * Props for AssetToolOptions panel
+ */
+export interface AssetToolOptionsProps {
+  assetType: AssetType;
+  widthCm: number;
+  onAssetTypeChange: (t: AssetType) => void;
+  onWidthChange: (cm: number) => void;
+  unitScale: number;
 }
 
 /**

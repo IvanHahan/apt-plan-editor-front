@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import type { FloorPlan, Node, Edge, Room, Fixture, EditorTool } from '../types';
+import type { FloorPlan, Node, Edge, Room, Fixture, EditorTool, AssetType, AssetPlacement } from '../types';
 import './FloorPlanCanvas.css';
 
 interface FloorPlanCanvasProps {
@@ -18,6 +18,12 @@ interface FloorPlanCanvasProps {
   wallThickness?: number;
   /** splits: map of nodeId → edgeId that should be split at that node's position */
   onWallAdd?: (edge: Edge, newNodes: Node[], splits?: { [nodeId: string]: string }) => void;
+  /** Asset tool: type of asset to place */
+  assetType?: AssetType;
+  /** Asset tool: desired asset width in cm */
+  assetWidthCm?: number;
+  /** Asset tool: called when user places an asset on a wall */
+  onAssetPlace?: (placement: AssetPlacement) => void;
 }
 
 // ============================================
@@ -349,6 +355,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   activeTool,
   wallThickness = 16,
   onWallAdd,
+  assetType = 'door',
+  assetWidthCm = 80,
+  onAssetPlace,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const gRef = useRef<SVGGElement>(null);
@@ -372,6 +381,24 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   wallFloorPlanEdgesRef.current = floorPlan.edges;
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
+
+  // Asset tool state — kept in refs to avoid re-renders on every mouse move
+  interface AssetSnap {
+    edge: Edge;
+    sourceNode: Node;
+    targetNode: Node;
+    assetStartPt: Point;
+    assetEndPt: Point;
+  }
+  const assetSnapRef = useRef<AssetSnap | null>(null);
+  const assetTypeRef = useRef(assetType);
+  assetTypeRef.current = assetType;
+  const assetWidthCmRef = useRef(assetWidthCm);
+  assetWidthCmRef.current = assetWidthCm;
+  const onAssetPlaceRef = useRef(onAssetPlace);
+  onAssetPlaceRef.current = onAssetPlace;
+  const unitScaleRef = useRef(floorPlan.unit_scale ?? 80);
+  unitScaleRef.current = floorPlan.unit_scale ?? 80;
 
   const [measurePoint1, setMeasurePoint1] = useState<Point | null>(null);
   const [measurePoint2, setMeasurePoint2] = useState<Point | null>(null);
@@ -820,6 +847,228 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     };
   }, [activeTool]);
 
+  // ============================================
+  // Asset Placement Tool interaction
+  // ============================================
+  useEffect(() => {
+    // When switching away from asset tool, clear any ghost
+    if (activeTool !== 'assets') {
+      assetSnapRef.current = null;
+      if (wallPreviewGRef.current) {
+        d3.select(wallPreviewGRef.current).selectAll('.asset-ghost').remove();
+      }
+      return;
+    }
+
+    const svg = svgRef.current;
+    const gElement = gRef.current;
+    if (!svg || !gElement) return;
+
+    /** Convert screen coords → data-space coords */
+    const toDataPoint = (clientX: number, clientY: number): Point => {
+      const p = (svg as SVGSVGElement).createSVGPoint();
+      p.x = clientX;
+      p.y = clientY;
+      const ctm = gElement.getScreenCTM();
+      if (!ctm) return { x: 0, y: 0 };
+      const tp = p.matrixTransform(ctm.inverse());
+      return { x: tp.x, y: tp.y };
+    };
+
+    /**
+     * Find the nearest WALL edge within 15 screen-pixels of the cursor and
+     * compute where on that wall the asset would snap.
+     * Returns null when no wall is close enough or the asset doesn't fit.
+     */
+    const findAssetSnap = (clientX: number, clientY: number): {
+      edge: Edge; sourceNode: Node; targetNode: Node;
+      assetStartPt: Point; assetEndPt: Point;
+    } | null => {
+      const k = d3.zoomTransform(svg as SVGSVGElement).k;
+      const hitThreshold = 15 / k;
+      const dp = toDataPoint(clientX, clientY);
+      const derivedUnitScale = unitScaleRef.current;
+      const assetWidthData = (assetWidthCmRef.current / 100) * derivedUnitScale;
+
+      let best: { edge: Edge; sourceNode: Node; targetNode: Node; t: number; dist: number } | null = null;
+
+      for (const edge of wallFloorPlanEdgesRef.current) {
+        if (edge.type !== 'wall') continue;
+        const fromNode = wallFloorPlanNodesRef.current.find(n => n.id === edge.source);
+        const toNode = wallFloorPlanNodesRef.current.find(n => n.id === edge.target);
+        if (!fromNode || !toNode) continue;
+
+        const edx = toNode.x - fromNode.x;
+        const edy = toNode.y - fromNode.y;
+        const lenSq = edx * edx + edy * edy;
+        if (lenSq === 0) continue;
+
+        const t = ((dp.x - fromNode.x) * edx + (dp.y - fromNode.y) * edy) / lenSq;
+        const tClamped = Math.max(0, Math.min(1, t));
+        const projX = fromNode.x + tClamped * edx;
+        const projY = fromNode.y + tClamped * edy;
+        const dist = Math.hypot(dp.x - projX, dp.y - projY);
+
+        if (dist >= hitThreshold) continue;
+        if (!best || dist < best.dist) {
+          best = { edge, sourceNode: fromNode, targetNode: toNode, t: tClamped, dist };
+        }
+      }
+
+      if (!best) return null;
+
+      const { edge, sourceNode, targetNode, t } = best;
+      const edx = targetNode.x - sourceNode.x;
+      const edy = targetNode.y - sourceNode.y;
+      const wallLen = Math.sqrt(edx * edx + edy * edy);
+
+      if (assetWidthData >= wallLen) return null; // asset doesn't fit
+
+      const assetHalf = assetWidthData / 2;
+      const tCenterMin = assetHalf / wallLen;
+      const tCenterMax = 1 - assetHalf / wallLen;
+      const tCenter = Math.max(tCenterMin, Math.min(tCenterMax, t));
+      const tStart = tCenter - assetHalf / wallLen;
+      const tEnd = tCenter + assetHalf / wallLen;
+
+      return {
+        edge,
+        sourceNode,
+        targetNode,
+        assetStartPt: {
+          x: sourceNode.x + tStart * edx,
+          y: sourceNode.y + tStart * edy,
+        },
+        assetEndPt: {
+          x: sourceNode.x + tEnd * edx,
+          y: sourceNode.y + tEnd * edy,
+        },
+      };
+    };
+
+    /** Render (or clear) the asset ghost on the preview layer */
+    const renderAssetGhost = (snap: typeof assetSnapRef.current) => {
+      if (!wallPreviewGRef.current) return;
+      const pg = d3.select(wallPreviewGRef.current);
+      pg.selectAll('.asset-ghost').remove();
+      if (!snap) return;
+
+      const k = d3.zoomTransform(svg as SVGSVGElement).k;
+      const { edge, assetStartPt, assetEndPt } = snap;
+      const thickness = edge.thickness ?? 16;
+      const type = assetTypeRef.current;
+
+      const poly = createRectPolygon(assetStartPt, assetEndPt, thickness);
+      const polyStr = poly.map(p => `${p.x},${p.y}`).join(' ');
+
+      const ghost = pg.append('g')
+        .attr('class', 'asset-ghost')
+        .attr('pointer-events', 'none');
+
+      // Ghost rectangle
+      const fillColor = type === 'door' ? 'rgba(210,105,30,0.45)' : 'rgba(135,206,235,0.45)';
+      const strokeColor = type === 'door' ? '#8B4513' : '#4682B4';
+
+      ghost.append('polygon')
+        .attr('points', polyStr)
+        .attr('fill', fillColor)
+        .attr('stroke', strokeColor)
+        .attr('stroke-width', 1.5 / k);
+
+      // Door: swing arc from assetStartPt
+      if (type === 'door') {
+        const radius = Math.hypot(
+          assetEndPt.x - assetStartPt.x,
+          assetEndPt.y - assetStartPt.y
+        );
+        const arcPath = createDoorArc(assetStartPt.x, assetStartPt.y, assetEndPt.x, assetEndPt.y, radius);
+        if (arcPath) {
+          ghost.append('path')
+            .attr('d', arcPath)
+            .attr('fill', 'none')
+            .attr('stroke', strokeColor)
+            .attr('stroke-width', 1 / k)
+            .attr('stroke-dasharray', `${4 / k},${2 / k}`);
+        }
+      }
+
+      // Window: center line
+      if (type === 'window') {
+        const midX = (assetStartPt.x + assetEndPt.x) / 2;
+        const midY = (assetStartPt.y + assetEndPt.y) / 2;
+        const dir = vecNorm(vecSub(assetEndPt, assetStartPt));
+        const perp = vecPerp(dir);
+        const halfT = thickness / 2;
+        ghost.append('line')
+          .attr('x1', midX - perp.x * halfT)
+          .attr('y1', midY - perp.y * halfT)
+          .attr('x2', midX + perp.x * halfT)
+          .attr('y2', midY + perp.y * halfT)
+          .attr('stroke', strokeColor)
+          .attr('stroke-width', 1.5 / k);
+      }
+
+      // Snap endpoints
+      ghost.append('circle')
+        .attr('cx', assetStartPt.x).attr('cy', assetStartPt.y)
+        .attr('r', 3 / k).attr('fill', strokeColor);
+      ghost.append('circle')
+        .attr('cx', assetEndPt.x).attr('cy', assetEndPt.y)
+        .attr('r', 3 / k).attr('fill', strokeColor);
+    };
+
+    const handleAssetMouseMove = (event: MouseEvent) => {
+      const snap = findAssetSnap(event.clientX, event.clientY);
+      assetSnapRef.current = snap;
+      renderAssetGhost(snap);
+      // Update cursor
+      if (svgRef.current) {
+        svgRef.current.style.cursor = snap ? 'crosshair' : 'default';
+      }
+    };
+
+    const handleAssetClick = (event: MouseEvent) => {
+      const snap = assetSnapRef.current;
+      if (!snap) return;
+      event.stopPropagation();
+      event.preventDefault();
+
+      onAssetPlaceRef.current?.({
+        wallEdge: snap.edge,
+        wallSourceNode: snap.sourceNode,
+        wallTargetNode: snap.targetNode,
+        assetStartPt: snap.assetStartPt,
+        assetEndPt: snap.assetEndPt,
+      });
+
+      // Clear ghost after placement
+      assetSnapRef.current = null;
+      renderAssetGhost(null);
+    };
+
+    const handleAssetKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        assetSnapRef.current = null;
+        renderAssetGhost(null);
+      }
+    };
+
+    svg.addEventListener('mousemove', handleAssetMouseMove);
+    svg.addEventListener('click', handleAssetClick, true);
+    window.addEventListener('keydown', handleAssetKeyDown);
+
+    return () => {
+      svg.removeEventListener('mousemove', handleAssetMouseMove);
+      svg.removeEventListener('click', handleAssetClick, true);
+      window.removeEventListener('keydown', handleAssetKeyDown);
+      // Clear ghost and cursor on cleanup
+      if (wallPreviewGRef.current) {
+        d3.select(wallPreviewGRef.current).selectAll('.asset-ghost').remove();
+      }
+      if (svgRef.current) svgRef.current.style.cursor = '';
+    };
+  }, [activeTool]);
+
   useEffect(() => {
     if (!svgRef.current || !gRef.current || !drawGRef.current) return;
 
@@ -1036,8 +1285,10 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         .attr('class', selectedEdgeIds.has(edge.id) ? 'wall selected' : 'wall')
         .attr('points', pointsStr)
         .attr('fill', draggedEdge?.id === edge.id ? '#0066cc' : (selectedEdgeIds.has(edge.id) ? '#2196F3' : '#333'))
-        .attr('cursor', (isEditMode && !measureMode) ? 'move' : 'default')
+        .attr('cursor', (isEditMode && !measureMode && activeTool !== 'assets') ? 'move' : (activeTool === 'assets' ? 'crosshair' : 'default'))
+        .attr('pointer-events', activeTool === 'assets' ? 'none' : 'auto')
         .on('mouseenter', function() {
+          if (activeToolRef.current === 'assets') return;
           d3.select(this)
             .transition()
             .duration(150)
@@ -1045,6 +1296,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .attr('opacity', 0.9);
         })
         .on('mouseleave', function() {
+          if (activeToolRef.current === 'assets') return;
           const isDragged = draggedEdge?.id === edge.id;
           const isSelected = selectedEdgeIds.has(edge.id);
           d3.select(this)
@@ -1054,6 +1306,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
             .attr('opacity', 1);
         })
         .on('click', function(event) {
+          if (activeToolRef.current === 'assets') return;
           event.stopPropagation();
           if (isShiftPressed && onSelectedEdgesChange) {
             // Toggle selection
@@ -1092,8 +1345,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
           const wallDrag = d3.drag<SVGPolygonElement, WallPolygon>()
             .filter(function() {
-              // Disable drag when Shift is pressed (for selection mode) or wall tool active
-              return !isShiftPressed && activeToolRef.current !== 'wall';
+              // Disable drag when Shift is pressed (for selection mode), wall tool or assets tool active
+              return !isShiftPressed && activeToolRef.current !== 'wall' && activeToolRef.current !== 'assets';
             })
             .on('start', function(_event) {
               setDraggedEdge(edge);
@@ -1388,7 +1641,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     if (isEditMode && !measureMode && onNodePositionsChange) {
       const drag = d3.drag<SVGGElement, Node>()
         .filter(function() {
-          return activeToolRef.current !== 'wall';
+          return activeToolRef.current !== 'wall' && activeToolRef.current !== 'assets';
         })
         .on('start', function(_event, d) {
           setDraggedNodeId(d.id);
@@ -1494,7 +1747,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
     // Center and fit the floor plan
     centerFloorPlan(drawG, floorPlan, width, height, zoomRef.current!, drawGRef);
-  }, [floorPlan, onEdgeClick, onRoomClick, selectedEdgeIds, isShiftPressed, onSelectedEdgesChange, onEdgeDelete]);
+  }, [floorPlan, onEdgeClick, onRoomClick, selectedEdgeIds, isShiftPressed, onSelectedEdgesChange, onEdgeDelete, activeTool]);
 
   const isEmpty = floorPlan.nodes.length === 0 && floorPlan.edges.length === 0;
 

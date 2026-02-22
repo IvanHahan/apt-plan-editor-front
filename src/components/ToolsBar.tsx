@@ -25,6 +25,12 @@ const TOOLS: ToolDefinition[] = [
     label: 'Wall',
     icon: '🧱',
     description: 'Draw new walls'
+  },
+  {
+    id: 'assets',
+    label: 'Assets',
+    icon: '🚪',
+    description: 'Place doors and windows on walls'
   }
 ];
 
