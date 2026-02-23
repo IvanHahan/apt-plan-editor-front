@@ -636,6 +636,9 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const guidelineGRef = useRef<SVGGElement | null>(null);
   const annotationGRef = useRef<SVGGElement | null>(null);
 
+  // Track calibration state to reset zoom when it changes
+  const prevIsCalibrated = useRef<boolean | undefined>(undefined);
+
   // Wall drawing state — kept in refs to avoid re-renders on every mouse move
   const wallDrawRef = useRef<{ startPoint: Point; startNodeId?: string; startSplitEdgeId?: string } | null>(null);
   const wallSnapNodeRef = useRef<string | null>(null);
@@ -1407,8 +1410,11 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
 
       const k = d3.zoomTransform(svg as SVGSVGElement).k;
       const { edge, assetStartPt, assetEndPt } = snap;
-      const thickness = edge.thickness ?? 16;
       const type = assetTypeRef.current;
+      // Doors/windows have a fixed depth independent of the host wall's thickness
+      const thickness = type === 'door'
+        ? (isCalibratedRef.current ? 0.1 : 8)
+        : (type === 'window' ? (isCalibratedRef.current ? 0.1 : 8) : (edge.thickness ?? 16));
 
       const poly = createRectPolygon(assetStartPt, assetEndPt, thickness);
       const polyStr = poly.map(p => `${p.x},${p.y}`).join(' ');
@@ -2519,6 +2525,16 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         });
       
       svg.call(selectionDrag as any);
+    }
+
+    // Reset zoom to identity when calibration changes so centerFloorPlan re-fits
+    // the new coordinate space (pixels ↔ metres).
+    const calibrationChanged = prevIsCalibrated.current !== undefined &&
+      prevIsCalibrated.current !== floorPlan.is_calibrated;
+    prevIsCalibrated.current = floorPlan.is_calibrated;
+    if (calibrationChanged && svgRef.current && zoomRef.current) {
+      d3.select<SVGSVGElement, unknown>(svgRef.current)
+        .call(zoomRef.current.transform, d3.zoomIdentity);
     }
 
     // After a full redraw, nodes are created with r=0 and get their radius set by

@@ -618,7 +618,7 @@ export const EditorLayout: React.FC = () => {
   const handleAssetPlace = async (placement: AssetPlacement) => {
     const { wallEdge, wallSourceNode, wallTargetNode, assetStartPt, assetEndPt } = placement;
 
-    const MIN_SEG = 1; // data units — skip degenerate wall stubs
+    const MIN_SEG = 0.001; // data units — skip only truly zero-length wall stubs
     const dx1 = assetStartPt.x - wallSourceNode.x;
     const dy1 = assetStartPt.y - wallSourceNode.y;
     const dx2 = wallTargetNode.x - assetEndPt.x;
@@ -647,7 +647,8 @@ export const EditorLayout: React.FC = () => {
       from_node: { id: assetStartId, x: assetStartPt.x, y: assetStartPt.y },
       to_node: { id: assetEndId, x: assetEndPt.x, y: assetEndPt.y },
       edge_type: assetType,
-      thickness: wallEdge.thickness,
+      // Doors and windows have a fixed depth of 0.1 m, independent of the host wall thickness
+      thickness: floorPlan.is_calibrated ? 0.1 : 8,
       is_inner: wallEdge.is_inner ?? true,
     });
     if (seg2Len >= MIN_SEG) {
