@@ -64,6 +64,11 @@ export const EditorLayout: React.FC = () => {
   // Wall tool state
   const [wallThickness, setWallThickness] = useState(0.2); // 0.2 m default (metres when calibrated)
 
+  // Reset wall thickness default when calibration status changes
+  React.useEffect(() => {
+    setWallThickness(floorPlan.is_calibrated ? 0.2 : 20);
+  }, [floorPlan.is_calibrated]);
+
   // Asset tool state
   const [assetType, setAssetType] = useState<AssetType>('door');
   const [assetWidthM, setAssetWidthM] = useState(0.8);

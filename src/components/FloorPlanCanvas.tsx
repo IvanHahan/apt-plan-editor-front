@@ -263,7 +263,7 @@ function computeJunctionCorners(
   let left = defaultLeft;
   if (prev.edge.id !== edge.id) {
     const prevPerp = vecPerp(prev.dir);
-    const prevHalf = (prev.edge.thickness || 0.2) / 2;
+    const prevHalf = (prev.edge.thickness || halfThick * 2) / 2;
     
     // Our left edge: starts at nodePos + perpDir * halfThick, goes along dir
     const p1 = vecAdd(nodePos, vecScale(perpDir, halfThick));
@@ -284,7 +284,7 @@ function computeJunctionCorners(
   let right = defaultRight;
   if (next.edge.id !== edge.id) {
     const nextPerp = vecPerp(next.dir);
-    const nextHalf = (next.edge.thickness || 0.2) / 2;
+    const nextHalf = (next.edge.thickness || halfThick * 2) / 2;
     
     // Our right edge: starts at nodePos - perpDir * halfThick, goes along dir
     const p1 = vecAdd(nodePos, vecScale(perpDir, -halfThick));
@@ -306,7 +306,7 @@ function computeJunctionCorners(
 /**
  * Compute wall polygons with proper corner joints
  */
-function computeWallPolygons(walls: Edge[], nodeMap: Map<string, Node>): WallPolygon[] {
+function computeWallPolygons(walls: Edge[], nodeMap: Map<string, Node>, defaultThickness = 0.2): WallPolygon[] {
   const adj = buildWallAdjacency(walls);
   const result: WallPolygon[] = [];
   
@@ -315,7 +315,7 @@ function computeWallPolygons(walls: Edge[], nodeMap: Map<string, Node>): WallPol
     const tgtNode = nodeMap.get(wall.target);
     if (!srcNode || !tgtNode) continue;
     
-    const thick = wall.thickness || 0.2;
+    const thick = wall.thickness || defaultThickness;
     const half = thick / 2;
     
     const srcPos: Point = { x: srcNode.x, y: srcNode.y };
@@ -1750,7 +1750,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     const windows = floorPlan.edges.filter((e: Edge) => e.type === 'window');
 
     // Compute wall polygons with proper corners and junctions
-    const wallPolygons = computeWallPolygons(walls, nodeMap);
+    const defaultWallThickness = isCalibratedRef.current ? 0.2 : 10;
+    const wallPolygons = computeWallPolygons(walls, nodeMap, defaultWallThickness);
 
     // Render walls with computed geometries
     wallPolygons.forEach((wallPoly: WallPolygon) => {
@@ -1882,7 +1883,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                 .attr('transform', (n: any) => `translate(${n.x},${n.y})`);
               
               // Recompute and update wall polygon
-              const updatedWallPolygons = computeWallPolygons([edge], nodeMap);
+              const updatedWallPolygons = computeWallPolygons([edge], nodeMap, isCalibratedRef.current ? 0.2 : 10);
               if (updatedWallPolygons.length > 0) {
                 const newPointsStr = updatedWallPolygons[0].polygon
                   .map(p => `${p.x},${p.y}`)
@@ -1991,7 +1992,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         
         if (!sourceNode || !targetNode) return;
 
-        const thickness = edge.thickness || 0.1;
+        const thickness = edge.thickness || (isCalibratedRef.current ? 0.1 : 8);
         const doorPolygon = createRectPolygon(
           { x: sourceNode.x, y: sourceNode.y },
           { x: targetNode.x, y: targetNode.y },
@@ -2094,7 +2095,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         
         if (!sourceNode || !targetNode) return;
 
-        const thickness = edge.thickness || 0.1;
+        const thickness = edge.thickness || (isCalibratedRef.current ? 0.1 : 8);
         const windowPolygon = createRectPolygon(
           { x: sourceNode.x, y: sourceNode.y },
           { x: targetNode.x, y: targetNode.y },
@@ -2253,7 +2254,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         const tgtPos = tgtOverride ?? (tgtNode ? { x: tgtNode.x, y: tgtNode.y } : null);
         if (!srcPos || !tgtPos) continue;
 
-        const thick = edge.thickness || 0.2;
+        const thick = edge.thickness || (isCalibratedRef.current ? 0.2 : 10);
 
         // Ghost wall body — semi-transparent fill showing thickness
         ghostG.append('line')
