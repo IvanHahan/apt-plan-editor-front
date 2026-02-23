@@ -2521,6 +2521,18 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       svg.call(selectionDrag as any);
     }
 
+    // After a full redraw, nodes are created with r=0 and get their radius set by
+    // the zoom handler. If the transform is already non-identity (user has zoomed
+    // or panned), centerFloorPlan returns early without triggering a zoom event,
+    // so we apply the current scale immediately here.
+    {
+      const currentK = d3.zoomTransform(svgRef.current!).k;
+      if (currentK !== 1) {
+        d3.select(drawGRef.current).selectAll('.node-point')
+          .attr('r', 3 / currentK);
+      }
+    }
+
     // Center and fit the floor plan
     centerFloorPlan(drawG, floorPlan, width, height, zoomRef.current!, drawGRef);
   }, [floorPlan, onEdgeClick, onRoomClick, isShiftPressed, onSelectedEdgesChange, onEdgeDelete, activeTool]);
@@ -2714,6 +2726,13 @@ function centerFloorPlan(
   const gElement = g.node()?.parentElement;
   const svgElement = gElement?.parentElement as SVGSVGElement | null;
   if (svgElement) {
+    // Only auto-fit on the very first load (identity transform).
+    // Once the user has zoomed/panned — or we've already fitted once — preserve
+    // their viewport so that adding walls or other edits don't jump the view.
+    const currentTransform = d3.zoomTransform(svgElement);
+    if (currentTransform.k !== 1 || currentTransform.x !== 0 || currentTransform.y !== 0) {
+      return;
+    }
     // Set node radii immediately for the target scale
     d3.select(drawGRef.current).selectAll('.node-point')
       .attr('r', 3 / scale);
