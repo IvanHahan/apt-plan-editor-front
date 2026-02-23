@@ -574,16 +574,64 @@ export const EditorLayout: React.FC = () => {
     }
   };
 
+  const handleEdgeThicknessSet = async (value: number) => {
+    if (!currentPlanId || selectedEdgeIds.size === 0) return;
+    const selectedEdges = floorPlan.edges.filter(e => selectedEdgeIds.has(e.id));
+    if (selectedEdges.length === 0) return;
+    const minThick = floorPlan.is_calibrated ? 0.01 : 1;
+    const clamped = Math.max(minThick, value);
+    const updates: EdgePropertyUpdate[] = selectedEdges.map(edge => ({ id: edge.id, thickness: clamped }));
+    setFloorPlan(prev => ({
+      ...prev,
+      edges: prev.edges.map(edge => {
+        const u = updates.find(u => u.id === edge.id);
+        return u ? { ...edge, thickness: clamped } : edge;
+      }),
+    }));
+    try {
+      const updatedPlan = await updateEdges(currentPlanId, updates);
+      setFloorPlan(convertApiToFloorPlan(updatedPlan));
+      setError(null);
+    } catch (err) {
+      console.error('Failed to update edge thickness:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update edge thickness');
+    }
+  };
+
+  const handleEdgeShiftSet = async (value: number) => {
+    if (!currentPlanId || selectedEdgeIds.size === 0) return;
+    const selectedEdges = floorPlan.edges.filter(e => selectedEdgeIds.has(e.id));
+    if (selectedEdges.length === 0) return;
+    const updates: EdgePropertyUpdate[] = selectedEdges.map(edge => ({ id: edge.id, shift: value }));
+    setFloorPlan(prev => ({
+      ...prev,
+      edges: prev.edges.map(edge => {
+        const u = updates.find(u => u.id === edge.id);
+        return u ? { ...edge, shift: value } : edge;
+      }),
+    }));
+    try {
+      const updatedPlan = await updateEdges(currentPlanId, updates);
+      setFloorPlan(convertApiToFloorPlan(updatedPlan));
+      setError(null);
+    } catch (err) {
+      console.error('Failed to update edge shift:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update edge shift');
+    }
+  };
+
   const handleEdgePropertyUpdate = async (delta: { thickness?: number; shift?: number }) => {
     if (!currentPlanId || selectedEdgeIds.size === 0) return;
 
     const selectedEdges = floorPlan.edges.filter(e => selectedEdgeIds.has(e.id));
     if (selectedEdges.length === 0) return;
 
+    const minThick = floorPlan.is_calibrated ? 0.01 : 1;
+    const defaultThick = floorPlan.is_calibrated ? 0.2 : 16;
     const updates: EdgePropertyUpdate[] = selectedEdges.map(edge => ({
       id: edge.id,
       ...(delta.thickness !== undefined
-        ? { thickness: Math.max(1, (edge.thickness ?? 16) + delta.thickness) }
+        ? { thickness: Math.max(minThick, (edge.thickness ?? defaultThick) + delta.thickness) }
         : {}),
       ...(delta.shift !== undefined
         ? { shift: (edge.shift ?? 0) + delta.shift }
@@ -951,10 +999,22 @@ export const EditorLayout: React.FC = () => {
             {/* Edge Selection Controls */}
             {selectedEdgeIds.size > 0 && isEditMode && !isRedesignMode && !isMeasureMode && (() => {
               const selectedEdges = floorPlan.edges.filter(e => selectedEdgeIds.has(e.id));
-              const thicknessValues = [...new Set(selectedEdges.map(e => e.thickness ?? 16))];
+              const isCalibrated = floorPlan.is_calibrated ?? false;
+              const defaultThick = isCalibrated ? 0.2 : 16;
+              const thicknessValues = [...new Set(selectedEdges.map(e => e.thickness ?? defaultThick))];
               const shiftValues = [...new Set(selectedEdges.map(e => e.shift ?? 0))];
-              const thicknessDisplay = thicknessValues.length === 1 ? thicknessValues[0].toString() : '–';
-              const shiftDisplay = shiftValues.length === 1 ? shiftValues[0].toString() : '–';
+              const thicknessRaw = thicknessValues.length === 1 ? thicknessValues[0] : null;
+              const thicknessDisplay = thicknessRaw !== null
+                ? (isCalibrated ? thicknessRaw.toFixed(2) : Math.round(thicknessRaw).toString())
+                : '–';
+              const thicknessUnit = isCalibrated ? ' m' : ' px';
+              const thicknessStep = isCalibrated ? 0.1 : 1;
+              const shiftRaw = shiftValues.length === 1 ? shiftValues[0] : null;
+              const shiftDisplay = shiftRaw !== null
+                ? (isCalibrated ? shiftRaw.toFixed(2) : Math.round(shiftRaw).toString())
+                : '–';
+              const shiftUnit = isCalibrated ? ' m' : ' px';
+              const shiftStep = isCalibrated ? 0.1 : 1;
               const stepperBtn: React.CSSProperties = {
                 backgroundColor: '#e3f2fd',
                 color: '#1565c0',
@@ -1054,15 +1114,72 @@ export const EditorLayout: React.FC = () => {
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontSize: '13px', color: '#555', fontWeight: 500 }}>Thickness:</span>
-                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ thickness: -1 })} title="Decrease thickness">▼</button>
-                      <span style={{ minWidth: '30px', textAlign: 'center', fontSize: '13px', fontWeight: 'bold', color: '#1565c0' }}>{thicknessDisplay}</span>
-                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ thickness: 1 })} title="Increase thickness">▲</button>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ thickness: -thicknessStep })} title="Decrease thickness">▼</button>
+                      <input
+                        key={`${Array.from(selectedEdgeIds).sort().join(',')}_${thicknessDisplay}`}
+                        type="number"
+                        defaultValue={thicknessDisplay}
+                        step={thicknessStep}
+                        min={isCalibrated ? 0.01 : 1}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const v = parseFloat((e.target as HTMLInputElement).value);
+                            if (!isNaN(v)) handleEdgeThicknessSet(v);
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (!isNaN(v)) handleEdgeThicknessSet(v);
+                        }}
+                        style={{
+                          width: '60px',
+                          textAlign: 'center',
+                          fontSize: '13px',
+                          fontWeight: 'bold',
+                          color: '#1565c0',
+                          border: '1px solid #90caf9',
+                          borderRadius: '4px',
+                          padding: '2px 4px',
+                          backgroundColor: '#e3f2fd',
+                        }}
+                      />
+                      <span style={{ fontSize: '12px', color: '#888' }}>{thicknessUnit}</span>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ thickness: thicknessStep })} title="Increase thickness">▲</button>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{ fontSize: '13px', color: '#555', fontWeight: 500 }}>Shift:</span>
-                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ shift: -1 })} title="Shift wall left/down">▼</button>
-                      <span style={{ minWidth: '30px', textAlign: 'center', fontSize: '13px', fontWeight: 'bold', color: '#1565c0' }}>{shiftDisplay}</span>
-                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ shift: 1 })} title="Shift wall right/up">▲</button>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ shift: -shiftStep })} title="Shift wall left/down">▼</button>
+                      <input
+                        key={`${Array.from(selectedEdgeIds).sort().join(',')}_shift_${shiftDisplay}`}
+                        type="number"
+                        defaultValue={shiftDisplay}
+                        step={shiftStep}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const v = parseFloat((e.target as HTMLInputElement).value);
+                            if (!isNaN(v)) handleEdgeShiftSet(v);
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        onBlur={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (!isNaN(v)) handleEdgeShiftSet(v);
+                        }}
+                        style={{
+                          width: '60px',
+                          textAlign: 'center',
+                          fontSize: '13px',
+                          fontWeight: 'bold',
+                          color: '#1565c0',
+                          border: '1px solid #90caf9',
+                          borderRadius: '4px',
+                          padding: '2px 4px',
+                          backgroundColor: '#e3f2fd',
+                        }}
+                      />
+                      <span style={{ fontSize: '12px', color: '#888' }}>{shiftUnit}</span>
+                      <button style={stepperBtn} onClick={() => handleEdgePropertyUpdate({ shift: shiftStep })} title="Shift wall right/up">▲</button>
                     </div>
                   </div>
                 </div>
