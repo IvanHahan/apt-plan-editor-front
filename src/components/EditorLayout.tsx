@@ -18,7 +18,7 @@ export const EditorLayout: React.FC = () => {
   const contentAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [floorPlan, setFloorPlan] = useState<FloorPlan>({ nodes: [], edges: [] });
+  const [floorPlan, setFloorPlan] = useState<FloorPlan>({ nodes: [], edges: [], is_calibrated: true });
   const [currentPlanId, setCurrentPlanId] = useState<string | null>(null);
   const currentPlanIdRef = useRef<string | null>(null);
   const [userPlans, setUserPlans] = useState<FloorPlanSummary[]>([]);
@@ -62,11 +62,11 @@ export const EditorLayout: React.FC = () => {
   const [activeTool, setActiveTool] = useState<EditorTool>('cursor');
 
   // Wall tool state
-  const [wallThickness, setWallThickness] = useState(16); // 20 cm at unit_scale=80
+  const [wallThickness, setWallThickness] = useState(0.2); // 0.2 m default (metres when calibrated)
 
   // Asset tool state
   const [assetType, setAssetType] = useState<AssetType>('door');
-  const [assetWidthCm, setAssetWidthCm] = useState(80);
+  const [assetWidthM, setAssetWidthM] = useState(0.8);
 
   const handleWallAdd = (newEdge: Edge, newNodes: Node[], splits?: { [nodeId: string]: string }) => {
     // Resolve node coordinates first — before any state mutation.
@@ -863,16 +863,16 @@ export const EditorLayout: React.FC = () => {
             <WallToolOptions
               thickness={wallThickness}
               onThicknessChange={setWallThickness}
-              unitScale={floorPlan.unit_scale ?? 80}
+              isCalibrated={floorPlan.is_calibrated ?? false}
             />
           )}
           {activeTool === 'assets' && (
             <AssetToolOptions
               assetType={assetType}
-              widthCm={assetWidthCm}
+              widthM={assetWidthM}
               onAssetTypeChange={setAssetType}
-              onWidthChange={setAssetWidthCm}
-              unitScale={floorPlan.unit_scale ?? 80}
+              onWidthChange={setAssetWidthM}
+              isCalibrated={floorPlan.is_calibrated ?? false}
             />
           )}
           
@@ -1069,7 +1069,7 @@ export const EditorLayout: React.FC = () => {
               wallThickness={wallThickness}
               onWallAdd={handleWallAdd}
               assetType={assetType}
-              assetWidthCm={assetWidthCm}
+              assetWidthM={assetWidthM}
               onAssetPlace={handleAssetPlace}
               onEdgeClick={() => {}}
               onRoomClick={isRedesignMode ? handleToggleRoomLock : undefined}

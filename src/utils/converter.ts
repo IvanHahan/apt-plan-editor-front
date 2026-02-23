@@ -54,5 +54,5 @@ export function convertApiToFloorPlan(apiPlan: FloorPlanDetail): FloorPlan {
     properties: fixture.properties,
   }));
 
-  return { nodes, edges, rooms, fixtures, unit_scale: apiPlan.unit_scale };
+  return { nodes, edges, rooms, fixtures, is_calibrated: apiPlan.is_calibrated };
 }

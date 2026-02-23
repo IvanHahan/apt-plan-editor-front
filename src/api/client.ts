@@ -48,7 +48,8 @@ export interface FloorPlanDetail {
   id: string;
   user_id: string;
   name: string | null;
-  unit_scale: number;
+  /** false = uncalibrated (pixel coords); true = coordinates are in metres */
+  is_calibrated: boolean;
   created_at: string;
   updated_at: string;
   nodes: ApiNode[];
@@ -61,7 +62,8 @@ export interface FloorPlanSummary {
   id: string;
   user_id: string;
   name: string | null;
-  unit_scale: number;
+  /** false = uncalibrated (pixel coords); true = coordinates are in metres */
+  is_calibrated: boolean;
   created_at: string;
   updated_at: string;
   nodes_count: number;
@@ -87,15 +89,13 @@ export interface User {
 export async function processFloorPlanImage(
   file: File,
   userId: string,
-  name?: string,
-  scaleFactor?: number
+  name?: string
 ): Promise<FloorPlanDetail> {
   const formData = new FormData();
   formData.append('file', file);
 
   const params = new URLSearchParams({ user_id: userId });
   if (name) params.append('name', name);
-  if (scaleFactor) params.append('scale_factor', scaleFactor.toString());
 
   const response = await fetch(`${API_BASE_URL}/floor-plans/process-image?${params}`, {
     method: 'POST',
@@ -411,13 +411,8 @@ export async function redesignFloorPlan(
   return response.json();
 }
 
-/**
- * Normalize scale response
- */
 export interface NormalizeScaleResponse {
   id: string;
-  previous_unit_scale: number;
-  new_unit_scale: number;
   scale_factor: number;
   message: string;
 }

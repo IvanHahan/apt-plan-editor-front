@@ -20,8 +20,8 @@ interface FloorPlanCanvasProps {
   onWallAdd?: (edge: Edge, newNodes: Node[], splits?: { [nodeId: string]: string }) => void;
   /** Asset tool: type of asset to place */
   assetType?: AssetType;
-  /** Asset tool: desired asset width in cm */
-  assetWidthCm?: number;
+  /** Asset tool: desired asset width in metres (or pixels when uncalibrated) */
+  assetWidthM?: number;
   /** Asset tool: called when user places an asset on a wall */
   onAssetPlace?: (placement: AssetPlacement) => void;
 }
@@ -58,6 +58,13 @@ interface Guideline {
 
 function vecSub(a: Point, b: Point): Point {
   return { x: a.x - b.x, y: a.y - b.y };
+}
+
+/** Format a data-space length as metres (calibrated) or pixels (uncalibrated). */
+function formatDataLen(dataLen: number, isCalibrated: boolean): string {
+  return isCalibrated
+    ? `${dataLen.toFixed(2)} m`
+    : `${Math.round(dataLen)} px`;
 }
 
 function vecAdd(a: Point, b: Point): Point {
@@ -616,7 +623,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   wallThickness = 16,
   onWallAdd,
   assetType = 'door',
-  assetWidthCm = 80,
+  assetWidthM = 0.8,
   onAssetPlace,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -658,12 +665,12 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   const assetSnapRef = useRef<AssetSnap | null>(null);
   const assetTypeRef = useRef(assetType);
   assetTypeRef.current = assetType;
-  const assetWidthCmRef = useRef(assetWidthCm);
-  assetWidthCmRef.current = assetWidthCm;
+  const assetWidthMRef = useRef(assetWidthM);
+  assetWidthMRef.current = assetWidthM;
   const onAssetPlaceRef = useRef(onAssetPlace);
   onAssetPlaceRef.current = onAssetPlace;
-  const unitScaleRef = useRef(floorPlan.unit_scale ?? 80);
-  unitScaleRef.current = floorPlan.unit_scale ?? 80;
+  const isCalibratedRef = useRef<boolean>(floorPlan.is_calibrated ?? false);
+  isCalibratedRef.current = floorPlan.is_calibrated ?? false;
 
   const [measurePoint1, setMeasurePoint1] = useState<Point | null>(null);
   const [measurePoint2, setMeasurePoint2] = useState<Point | null>(null);
@@ -1223,12 +1230,11 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       if (annotationGRef.current) {
         const ag = d3.select(annotationGRef.current as SVGGElement);
         ag.selectAll('*').remove();
-        const us = unitScaleRef.current;
+        const isCalibrated = isCalibratedRef.current;
         const wallLen = vecLen(vecSub(endPoint, startPoint));
         // Length label along the preview wall
         if (wallLen > 1e-6) {
-          const wallLenM = wallLen / us;
-          renderLengthLabel(ag, startPoint, endPoint, `${wallLenM.toFixed(2)} m`, k);
+          renderLengthLabel(ag, startPoint, endPoint, formatDataLen(wallLen, isCalibrated), k);
         }
         // Angles at start node (if snapped to an existing node)
         const startNodeId = wallDrawRef.current.startNodeId;
@@ -1333,8 +1339,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       const k = d3.zoomTransform(svg as SVGSVGElement).k;
       const hitThreshold = 15 / k;
       const dp = toDataPoint(clientX, clientY);
-      const derivedUnitScale = unitScaleRef.current;
-      const assetWidthData = (assetWidthCmRef.current / 100) * derivedUnitScale;
+      // 1 data-unit == 1 metre when calibrated, so widthM IS the data-space width.
+      const assetWidthData = assetWidthMRef.current;
 
       let best: { edge: Edge; sourceNode: Node; targetNode: Node; t: number; dist: number } | null = null;
 
@@ -1560,7 +1566,11 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       const ys = floorPlan.nodes.map((n: Node) => n.y);
       const dx = Math.max(...xs) - Math.min(...xs);
       const dy = Math.max(...ys) - Math.min(...ys);
-      dataExtent = Math.max(dx, dy, 1);
+      // For calibrated plans use at least 15 m as a floor so dataUnit stays
+      // sensible (≈ 0.03 m) even when only a few nearby nodes exist.
+      dataExtent = Math.max(dx, dy, floorPlan.is_calibrated ? 15 : 1);
+    } else if (floorPlan.is_calibrated) {
+      dataExtent = 15; // typical apartment width in metres
     }
     const dataUnit = dataExtent / 500;
 
@@ -1688,10 +1698,14 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         const area = calculatePolygonArea(polygon);
         const centroid = calculateCentroid(polygon);
         
-        // Convert area to square meters if unit_scale is available
-        // Default unit scale is 80 units/meter, so 1 unit² = (1/80)² m²
-        const unitScale = floorPlan.unit_scale || 80;
-        const areaInSquareMeters = area / (unitScale * unitScale);
+        // Compute area label depending on calibration state.
+        const isCalibrated = floorPlan.is_calibrated ?? false;
+        let areaLabel: string;
+        if (isCalibrated) {
+          areaLabel = `${area.toFixed(1)} m\u00b2`;
+        } else {
+          areaLabel = `${Math.round(area).toLocaleString()} px\u00b2`;
+        }
         
         // Determine vertical offset based on whether lock icon is present
         const hasLock = d.locked && onRoomClick;
@@ -1709,7 +1723,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           .attr('font-weight', '600')
           .attr('fill', '#333')
           .attr('pointer-events', 'none')
-          .text(`${areaInSquareMeters.toFixed(1)} m²`);
+          .text(areaLabel);
         
         // Add semi-transparent background for better readability
         const textNode = d3.select(this).select('.room-area-label').node() as SVGGraphicsElement | null;
@@ -1771,13 +1785,13 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
               const kHov = d3.zoomTransform(svgRef.current!).k;
               const ag = d3.select(annotationGRef.current as SVGGElement);
               ag.selectAll('*').remove();
-              const us = unitScaleRef.current;
+              const isCalibrated = isCalibratedRef.current;
               for (let si = 0; si < poly.length; si++) {
                 const pa = poly[si];
                 const pb = poly[(si + 1) % poly.length];
                 const sideLen = vecLen(vecSub(pb, pa));
                 if (sideLen < 1e-6) continue;
-                renderLengthLabel(ag, pa, pb, `${(sideLen / us).toFixed(2)} m`, kHov);
+                renderLengthLabel(ag, pa, pb, formatDataLen(sideLen, isCalibrated), kHov);
               }
             }
           }
@@ -1887,7 +1901,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                 const kEdgeDrag = d3.zoomTransform(svgRef.current!).k;
                 const ag = d3.select(annotationGRef.current as SVGGElement);
                 ag.selectAll('*').remove();
-                const us = unitScaleRef.current;
+                const isCalibrated = isCalibratedRef.current;
                 const sharedEdges = wallFloorPlanEdgesRef.current.filter(e =>
                   e.source === edge.source || e.target === edge.source ||
                   e.source === edge.target || e.target === edge.target
@@ -1898,7 +1912,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
                   if (!srcPt || !tgtPt) continue;
                   const segLen = vecLen(vecSub(tgtPt, srcPt));
                   if (segLen < 1e-6) continue;
-                  renderLengthLabel(ag, srcPt, tgtPt, `${(segLen / us).toFixed(2)} m`, kEdgeDrag);
+                  renderLengthLabel(ag, srcPt, tgtPt, formatDataLen(segLen, isCalibrated), kEdgeDrag);
                 }
               }
             })
@@ -2392,14 +2406,14 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
           if (annotationGRef.current) {
             const ag = d3.select(annotationGRef.current as SVGGElement);
             ag.selectAll('*').remove();
-            const us = unitScaleRef.current;
+            const isCalibrated = isCalibratedRef.current;
             for (const edge of connectedEdges) {
               const otherId = edge.source === d.id ? edge.target : edge.source;
               const other = wallFloorPlanNodesRef.current.find(n => n.id === otherId);
               if (!other) continue;
               const segLen = vecLen(vecSub({ x: d.x, y: d.y }, other));
               if (segLen < 1e-6) continue;
-              renderLengthLabel(ag, { x: d.x, y: d.y }, other, `${(segLen / us).toFixed(2)} m`, kDrag);
+              renderLengthLabel(ag, { x: d.x, y: d.y }, other, formatDataLen(segLen, isCalibrated), kDrag);
             }
             if (connectedEdges.length >= 2) {
               const angles = connectedEdges.map(e => {
@@ -2654,7 +2668,29 @@ function centerFloorPlan(
     });
   }
 
-  if (!isFinite(minX)) return; // No data to center
+  if (!isFinite(minX)) {
+    // Empty plan — for calibrated plans set a sensible initial zoom once:
+    // 50 screen-pixels per metre, centred at 0,0. Only applies when the zoom
+    // is still at identity (user hasn't panned/zoomed yet).
+    if (floorPlan.is_calibrated) {
+      const gElement = g.node()?.parentElement;
+      const svgElement = gElement?.parentElement as SVGSVGElement | null;
+      if (svgElement) {
+        const t = d3.zoomTransform(svgElement);
+        if (t.k === 1 && t.x === 0 && t.y === 0) {
+          const defaultScale = 50; // px per metre
+          const transform = d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(defaultScale);
+          d3.select<SVGSVGElement, unknown>(svgElement)
+            .call(zoom.transform, transform);
+          d3.select(drawGRef.current).selectAll('.node-point')
+            .attr('r', 3 / defaultScale);
+        }
+      }
+    }
+    return;
+  }
 
   const planWidth = maxX - minX;
   const planHeight = maxY - minY;

@@ -63,7 +63,8 @@ export interface FloorPlan {
   edges: Edge[];
   rooms?: Room[];
   fixtures?: Fixture[];
-  unit_scale?: number;
+  /** false = uncalibrated (pixel coords); true = coordinates are in metres */
+  is_calibrated?: boolean;
 }
 
 /**
@@ -93,7 +94,7 @@ export interface AssetPlacement {
 export interface WallToolOptionsProps {
   thickness: number;          // in data-space units
   onThicknessChange: (v: number) => void;
-  unitScale: number;          // data-units per metre
+  isCalibrated: boolean;
 }
 
 /**
@@ -101,10 +102,11 @@ export interface WallToolOptionsProps {
  */
 export interface AssetToolOptionsProps {
   assetType: AssetType;
-  widthCm: number;
+  /** Width in metres when calibrated, pixels when uncalibrated */
+  widthM: number;
   onAssetTypeChange: (t: AssetType) => void;
-  onWidthChange: (cm: number) => void;
-  unitScale: number;
+  onWidthChange: (m: number) => void;
+  isCalibrated: boolean;
 }
 
 /**
